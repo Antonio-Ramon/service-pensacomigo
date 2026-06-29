@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PensaComigo.Application/PensaComigo.Application.csproj" />
+    <Project Path="src/PensaComigo.Domain/PensaComigo.Domain.csproj" />
+    <Project Path="src/PensaComigo.Persistence/PensaComigo.Persistence.csproj" />
+    <Project Path="src/PensaComigo.Shared/PensaComigo.Shared.csproj" />
+    <Project Path="src/PensaComigo.Web/PensaComigo.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PensaComigo.IntegrationTests/PensaComigo.IntegrationTests.csproj" />
+    <Project Path="tests/PensaComigo.UnitTests/PensaComigo.UnitTests.csproj" />
+  </Folder>
+</Solution>
