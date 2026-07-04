@@ -5,3 +5,5 @@ obj/
 .vscode/ 
 *.user
 .claude/
+_bmad/
+_bmad-output/
