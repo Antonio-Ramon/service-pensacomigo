@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 01 — Mapeamento EF Core & DbContext</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Como o C# vira tabela</h1>
+<p class="sub">Aula 01 · Fatia 1 do Ticket 01 · EF Core, DbContext e Fluent API</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como uma classe C# (<code>Usuario</code>,
+<code>Post</code>…) é traduzida numa tabela Postgres — e escrever essa tradução.
+No fim, a camada Persistence mapeia o schema inteiro e compila.
+</div>
+
+<h2>1. O modelo mental</h2>
+<p>
+Você vem de outra linguagem, então o atalho: <strong>EF Core é um ORM</strong> —
+Object-Relational Mapper. Ele é a ponte entre dois mundos:
+</p>
+<table>
+<tr><th>Mundo dos objetos (C#)</th><th>Mundo relacional (Postgres)</th></tr>
+<tr><td>classe <code>Usuario</code></td><td>tabela <code>usuarios</code></td></tr>
+<tr><td>propriedade <code>Email</code></td><td>coluna <code>email</code></td></tr>
+<tr><td>instância na memória</td><td>linha (row)</td></tr>
+<tr><td>propriedade de navegação <code>Post.Autor</code></td><td>foreign key <code>autor_id</code></td></tr>
+</table>
+<p>
+Três peças fazem isso funcionar:
+</p>
+<ul>
+<li><strong><code>DbContext</code></strong> — a sessão com o banco. Um objeto que representa
+"a conversa com o Postgres". Tem uma <code>DbSet&lt;T&gt;</code> por tabela e é ele
+que traduz LINQ → SQL e rastreia mudanças pra salvar.</li>
+<li><strong>Configuration (Fluent API)</strong> — a folha de tradução de cada entidade:
+qual tabela, qual chave, quais colunas, quais constraints, quais relacionamentos.</li>
+<li><strong>Migration</strong> — o diff entre o modelo atual e o banco, virado em SQL
+(vem na fatia 4).</li>
+</ul>
+
+<h2>2. Por que Fluent API e não atributos?</h2>
+<p>
+Existem duas formas de configurar: <em>Data Annotations</em> (atributos <code>[Required]</code>
+grudados na entidade) ou <strong>Fluent API</strong> (classes separadas). Escolhemos Fluent
+API porque a entidade do <strong>Domain</strong> não pode saber que existe banco de dados —
+é a regra da Clean Architecture (Domain não referencia Persistence). Toda config de
+persistência fica isolada no projeto Persistence.
+<a href="https://learn.microsoft.com/en-us/ef/core/modeling/#use-fluent-api-to-configure-a-model">[docs EF Core]</a>
+</p>
+
+<h2>3. Anatomia de uma Configuration</h2>
+<p>A folha de tradução do <code>Usuario</code>. Leia os comentários:</p>
+<pre><code>public class UsuarioConfiguration : IEntityTypeConfiguration&lt;Usuario&gt;
+{
+    public void Configure(EntityTypeBuilder&lt;Usuario&gt; builder)
+    {
+        builder.ToTable("usuarios");              // nome da tabela
+        builder.HasKey(u =&gt; u.Id);                // primary key
+
+        builder.Property(u =&gt; u.Nome)
+               .HasColumnName("nome")
+               .IsRequired();                     // NOT NULL
+
+        builder.Property(u =&gt; u.Email)
+               .HasColumnName("email")
+               .IsRequired();
+        builder.HasIndex(u =&gt; u.Email).IsUnique(); // UNIQUE
+
+        builder.Property(u =&gt; u.IsAdmin)
+               .HasColumnName("is_admin")
+               .HasDefaultValue(false);           // DEFAULT false no banco
+    }
+}</code></pre>
+<p>
+Cada linha vira SQL na migration. <code>u =&gt; u.Email</code> é uma
+<strong>lambda</strong> — "aponte pra propriedade Email"; o EF lê a expressão pra
+saber de qual coluna você fala (não executa nada).
+</p>
+
+<h2>4. Relacionamentos — a parte que confunde</h2>
+<p>
+No banco, um relacionamento é uma foreign key. No C#, ele aparece como
+<strong>propriedades de navegação</strong>. Ex.: <code>Post</code> tem
+<code>AutorId</code> (a FK) <em>e</em> <code>Autor</code> (o objeto navegável).
+A config amarra os dois lados:
+</p>
+<pre><code>builder.HasOne(p =&gt; p.Autor)          // um Post tem um Autor
+       .WithMany(u =&gt; u.Posts)        // um Usuario tem muitos Posts
+       .HasForeignKey(p =&gt; p.AutorId);</code></pre>
+<p>Casos que você vai ver nesta fatia:</p>
+<ul>
+<li><strong>1:N</strong> — Post → Autor (acima).</li>
+<li><strong>Auto-referência</strong> — <code>Comentario.Parent</code> aponta pra outro
+<code>Comentario</code> (respostas de 1 nível).</li>
+<li><strong>N:N</strong> — <code>Post</code> ↔ <code>Tag</code> gera a tabela de junção
+<code>post_tags</code>. O EF cria ela sozinho a partir das duas navegações.</li>
+<li><strong>Unique composto</strong> — <code>likes(post_id, viewer_hash)</code> impede
+curtida duplicada.</li>
+</ul>
+
+<h2>5. O DbContext junta tudo</h2>
+<pre><code>public class PensaComigoDbContext : DbContext
+{
+    public PensaComigoDbContext(DbContextOptions&lt;PensaComigoDbContext&gt; options)
+        : base(options) { }
+
+    public DbSet&lt;Usuario&gt; Usuarios =&gt; Set&lt;Usuario&gt;();
+    public DbSet&lt;Post&gt; Posts =&gt; Set&lt;Post&gt;();
+    // ...
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // varre o assembly e aplica TODA classe IEntityTypeConfiguration
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(PensaComigoDbContext).Assembly);
+    }
+}</code></pre>
+<p>
+<code>ApplyConfigurationsFromAssembly</code> é a linha preguiçosa boa: você nunca
+precisa registrar cada configuration à mão — some uma nova classe na pasta e ela
+entra sozinha.
+</p>
+
+<h2>Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que a config de persistência mora em classes separadas, não em atributos na entidade?</p>
+<button>Atributos são mais lentos em tempo de execução</button>
+<button>O Domain não pode depender de detalhes de banco (Clean Architecture)</button>
+<button>Fluent API gera SQL menor que Data Annotations</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> O que <code>ApplyConfigurationsFromAssembly</code> faz?</p>
+<button>Cria as tabelas no banco na hora que a API sobe</button>
+<button>Aplica automaticamente toda IEntityTypeConfiguration do assembly</button>
+<button>Registra o DbContext no contêiner de injeção de dependência</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Numa relação N:N entre Post e Tag, quem cria a tabela <code>post_tags</code>?</p>
+<button>O EF Core, a partir das duas propriedades de navegação</button>
+<button>Você escreve uma classe de entidade PostTag à mão sempre</button>
+<button>O Postgres cria via trigger automático</button>
+<div class="fb"></div>
+</div>
+
+<div class="card tip">
+<strong>Fonte primária recomendada:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/modeling/">EF Core — Creating and configuring a model</a>
+(seções "Fluent API" e "Relationships"). É a doc oficial da Microsoft — leia as duas primeiras seções.
+</div>
+
+<div class="card">
+<strong>Próxima aula (Fatia 2):</strong> a linha misteriosa do <code>Post</code> —
+como <code>List&lt;Bloco&gt;</code> vira uma coluna <code>jsonb</code> com
+<code>HasConversion</code>. Veja a <a href="../reference/ef-core-fluent-api.html">referência de consulta rápida</a>.
+</div>
+
+<div class="foot">
+Travou em algo? <strong>Eu sou seu professor</strong> — pergunta no chat.
+Quer testar de verdade? A doc do EF Core tem exemplos rodáveis; e o
+<a href="https://stackoverflow.com/questions/tagged/entity-framework-core">tag entity-framework-core no Stack Overflow</a>
+é a comunidade onde essas dúvidas são respondidas.
+</div>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>
