@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Referência — EF Core Fluent API</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<h1>Fluent API — consulta rápida</h1>
+<p class="sub">Cheat sheet · EF Core 10 · o que cada método vira em SQL</p>
+
+<h2>Tabela & colunas</h2>
+<table>
+<tr><th>Fluent API</th><th>SQL</th></tr>
+<tr><td><code>ToTable("usuarios")</code></td><td>nome da tabela</td></tr>
+<tr><td><code>HasKey(x =&gt; x.Id)</code></td><td><code>PRIMARY KEY</code></td></tr>
+<tr><td><code>Property(x =&gt; x.Nome).HasColumnName("nome")</code></td><td>nome da coluna</td></tr>
+<tr><td><code>.IsRequired()</code></td><td><code>NOT NULL</code></td></tr>
+<tr><td><code>.HasMaxLength(200)</code></td><td><code>varchar(200)</code></td></tr>
+<tr><td><code>.HasDefaultValue(false)</code></td><td><code>DEFAULT false</code></td></tr>
+<tr><td><code>.HasDefaultValueSql("now()")</code></td><td><code>DEFAULT now()</code></td></tr>
+<tr><td><code>.HasColumnType("jsonb")</code></td><td>tipo da coluna</td></tr>
+</table>
+
+<h2>Índices & constraints</h2>
+<table>
+<tr><th>Fluent API</th><th>SQL</th></tr>
+<tr><td><code>HasIndex(x =&gt; x.Slug).IsUnique()</code></td><td><code>UNIQUE INDEX</code></td></tr>
+<tr><td><code>HasIndex(x =&gt; new { x.PostId, x.ViewerHash }).IsUnique()</code></td><td>unique composto</td></tr>
+<tr><td><code>HasIndex(x =&gt; x.DataCriacao)</code></td><td>índice normal</td></tr>
+</table>
+
+<h2>Relacionamentos</h2>
+<table>
+<tr><th>Cenário</th><th>Fluent API</th></tr>
+<tr><td>1:N (Post → Autor)</td><td><code>HasOne(p=&gt;p.Autor).WithMany(u=&gt;u.Posts).HasForeignKey(p=&gt;p.AutorId)</code></td></tr>
+<tr><td>Auto-ref (Comentario)</td><td><code>HasOne(c=&gt;c.Parent).WithMany(c=&gt;c.Respostas).HasForeignKey(c=&gt;c.ParentId)</code></td></tr>
+<tr><td>N:N (Post ↔ Tag)</td><td><code>HasMany(p=&gt;p.Tags).WithMany(t=&gt;t.Posts).UsingEntity("post_tags")</code></td></tr>
+<tr><td>Cascade delete</td><td><code>.OnDelete(DeleteBehavior.Cascade)</code></td></tr>
+</table>
+
+<h2>Conversor de valor (jsonb) — Fatia 2</h2>
+<pre><code>builder.Property(p =&gt; p.Conteudo)
+       .HasColumnType("jsonb")
+       .HasConversion(
+           v =&gt; JsonSerializer.Serialize(v, opts),      // C# → string
+           v =&gt; JsonSerializer.Deserialize&lt;List&lt;Bloco&gt;&gt;(v, opts)!); // string → C#</code></pre>
+
+<h2>Comandos EF (CLI)</h2>
+<pre><code>dotnet ef migrations add &lt;Nome&gt; -p src/PensaComigo.Persistence -s src/PensaComigo.Web
+dotnet ef database update  -p src/PensaComigo.Persistence -s src/PensaComigo.Web</code></pre>
+<p class="sub"><code>-p</code> = projeto que tem o DbContext · <code>-s</code> = projeto startup (Web)</p>
+</body>
+</html>
