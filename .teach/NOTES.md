@@ -10,6 +10,9 @@
 - [x] Fatia 1 — Mapeamento EF Core + DbContext (aula 0001) — build verde
 - [x] Fatia 2 — jsonb via HasConversion + ValueComparer (aula 0002). Código já
   estava no PostConfiguration desde a Fatia 1; esta fatia foi entendimento.
+- [x] Fatia 3 — Repository pattern + DI (aula 0003). Interfaces no Domain, 4 impls
+  esqueleto no Persistence, `AddPersistence()` no Program.cs. Build verde.
+  DbContext ainda fora da DI (vem na Fatia 4).
 
 ## Observações técnicas encontradas
 - `Usuario.IsAdmin` na entidade tem default `true`, mas schema/ticket pede coluna

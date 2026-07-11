@@ -10,7 +10,7 @@ Persistence:
 - [x] `PensaComigoDbContext` com `EntityTypeConfiguration` de todas as entidades conforme schema §5.4
 - [ ] Contadores desnormalizados em `posts`; `comentarios.parent_id` auto-referência; `likes` unique `(post_id, viewer_hash)`; `usuarios.is_admin` default `false`; **sem** índice GIN
 - [x] `Post.Conteudo` (`List<Bloco>`) persiste em coluna `jsonb` via conversor manual (`HasConversion` + `JsonSerializer`), tratado como blob
-- [ ] Interfaces (`IPostRepository`, `IComentarioRepository`, `IUsuarioRepository`, `ITagRepository`) no Domain + implementações esqueleto no Persistence (métodos crescem por fatia)
+- [x] Interfaces (`IPostRepository`, `IComentarioRepository`, `IUsuarioRepository`, `ITagRepository`) no Domain + implementações esqueleto no Persistence (métodos crescem por fatia)
 - [ ] Migration inicial + seed `UsuariosSeed` (Antonio, Jéssica)
 - [ ] Conexão Supabase: SSL obrigatório; direta (5432) para migration, pooled Supavisor (6543) para runtime
 

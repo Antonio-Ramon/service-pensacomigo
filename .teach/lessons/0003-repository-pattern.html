@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 03 — Repository Pattern + DI</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>O contrato mora no Domain, o motor mora no Persistence</h1>
+<p class="sub">Aula 03 · Fatia 3 do Ticket 01 · Repository pattern, inversão de dependência e DI</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender por que a <em>interface</em> do
+repositório fica no Domain e a <em>implementação</em> (que usa EF Core) fica no
+Persistence — e como a injeção de dependência costura as duas em runtime.
+</div>
+
+<h2>1. O problema que o pattern resolve</h2>
+<p>
+O caso de uso (Application) precisa buscar e gravar posts. Se ele chamasse
+<code>dbContext.Posts.FirstOrDefault(...)</code> direto, a Application ficaria
+<strong>amarrada ao EF Core</strong>. Trocar de ORM, ou testar sem banco, viraria
+um pesadelo. Clean Architecture proíbe isso: o núcleo não conhece infraestrutura.
+</p>
+
+<h2>2. Inversão de dependência (o "D" do SOLID)</h2>
+<p>
+A direção normal seria Application → Persistence (quem precisa aponta pra quem faz).
+Invertida, os dois apontam pra uma <strong>abstração no meio</strong>:
+</p>
+<pre><code>Application  ─chama→  IPostRepository        <span class="cmt">(interface, no Domain)</span>
+                            ▲
+Persistence  ─implementa┘   PostRepository    <span class="cmt">(classe, usa EF Core)</span></code></pre>
+<p>
+A seta de dependência do Persistence <strong>sobe</strong> pro Domain. O Domain
+não sabe que o EF existe — ele só define <em>o quê</em> (o contrato). O Persistence
+decide <em>como</em>.
+</p>
+
+<h2>3. As duas metades</h2>
+
+<h3>a) O contrato — <code>Domain/Repositories/IPostRepository.cs</code></h3>
+<pre><code>public interface IPostRepository
+{
+    Task&lt;Post?&gt; ObterPorIdAsync(Guid id, CancellationToken ct = default);
+    Task AdicionarAsync(Post post, CancellationToken ct = default);
+}</code></pre>
+<p>
+Nada de EF aqui — só tipos do Domain. Note o <code>?</code> em <code>Post?</code>:
+"pode não achar". E <code>CancellationToken</code>, padrão em todo método async .NET
+(deixa o request abortar a query se o cliente desistir).
+</p>
+
+<h3>b) O motor — <code>Persistence/Repositories/PostRepository.cs</code></h3>
+<pre><code>public class PostRepository(PensaComigoDbContext db) : IPostRepository
+{
+    public Task&lt;Post?&gt; ObterPorIdAsync(Guid id, CancellationToken ct = default) =&gt;
+        db.Posts.FirstOrDefaultAsync(p =&gt; p.Id == id, ct);
+
+    public async Task AdicionarAsync(Post post, CancellationToken ct = default) =&gt;
+        await db.Posts.AddAsync(post, ct);
+}</code></pre>
+<div class="card warn">
+<code>AdicionarAsync</code> <strong>não</strong> chama <code>SaveChanges</code>. Ele só
+<em>rastreia</em> o objeto. Quem grava de fato é o <code>UnitOfWorkBehavior</code> (Fatia 5),
+num commit atômico por comando. Repositório junta a intenção; UnitOfWork fecha a transação.
+</div>
+<p>
+<code>PostRepository(PensaComigoDbContext db)</code> é <strong>primary constructor</strong>
+(C# 12): o parâmetro <code>db</code> vira campo utilizável no corpo, sem boilerplate.
+De onde vem esse <code>db</code>? Da DI — próximo ponto.
+</p>
+
+<h2>4. Injeção de dependência (DI)</h2>
+<p>
+Ninguém dá <code>new PostRepository(...)</code> na mão. Você <strong>registra</strong> o
+mapa "interface → implementação" no container, e ele constrói tudo pra você:
+</p>
+<pre><code><span class="cmt">// Persistence/DependencyInjection.cs</span>
+services.AddScoped&lt;IPostRepository, PostRepository&gt;();</code></pre>
+<p>
+Quando algo pedir <code>IPostRepository</code> no construtor, o container cria um
+<code>PostRepository</code> e injeta o <code>DbContext</code> que <em>ele</em> precisa —
+recursivamente. <code>AddScoped</code> = uma instância por request HTTP (o tempo de vida
+certo pra DbContext).
+</p>
+<p>
+Tudo fica numa <strong>extension method</strong> <code>AddPersistence()</code>, então o
+<code>Program.cs</code> só faz <code>builder.Services.AddPersistence();</code> — a fiação
+mora na camada dona dela, não vaza pro host.
+</p>
+
+<h2>5. Checkpoint</h2>
+<p>Responde as três pro seu professor (o agente):</p>
+<ol>
+<li>Por que a <em>interface</em> vai no Domain e a <em>classe</em> no Persistence — o que quebraria se invertesse?</li>
+<li>Por que <code>AdicionarAsync</code> não chama <code>SaveChanges</code>?</li>
+<li>O que <code>AddScoped&lt;IPostRepository, PostRepository&gt;()</code> faz quando alguém pede <code>IPostRepository</code>?</li>
+</ol>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection">Dependency injection in .NET (Microsoft Learn)</a>
+· contexto do pattern: <a href="https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/infrastructure-persistence-layer-design">Repository pattern (eShop, MS Docs)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0002-jsonb-hasconversion.html">Aula 02 — jsonb via HasConversion</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+</body>
+</html>
