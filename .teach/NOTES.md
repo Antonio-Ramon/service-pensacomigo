@@ -8,6 +8,8 @@
 
 ## Progresso
 - [x] Fatia 1 — Mapeamento EF Core + DbContext (aula 0001) — build verde
+- [x] Fatia 2 — jsonb via HasConversion + ValueComparer (aula 0002). Código já
+  estava no PostConfiguration desde a Fatia 1; esta fatia foi entendimento.
 
 ## Observações técnicas encontradas
 - `Usuario.IsAdmin` na entidade tem default `true`, mas schema/ticket pede coluna
