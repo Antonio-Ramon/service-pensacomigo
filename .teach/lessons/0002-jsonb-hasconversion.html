@@ -68,13 +68,31 @@ os dois e compara o JSON), calcular hash, e fazer o snapshot com <strong>cópia 
 (deep copy via re-serialização). É o que faz mutação dentro da lista ser detectada.
 </p>
 
-<h2>3. Checkpoint</h2>
-<p>Responde as três pro seu professor (o agente):</p>
-<ol>
-<li>Por que <code>Bloco</code> virou coluna <code>jsonb</code> em vez de tabela própria?</li>
-<li>O que cada lambda do <code>HasConversion</code> faz, e quando roda?</li>
-<li>Sem o <code>ValueComparer</code>, que bug aparece — e por que sem mensagem de erro?</li>
-</ol>
+<h2>3. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>Bloco</code> virou coluna <code>jsonb</code> em vez de tabela própria?</p>
+<button>Porque jsonb é sempre mais rápido que qualquer tabela relacional</button>
+<button>Porque o bloco nunca é consultado sozinho — carrega inteiro junto com o post</button>
+<button>Porque o Postgres não permite tabelas com muitas colunas</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> O que a lambda de <em>ida</em> do <code>HasConversion</code> faz, e quando roda?</p>
+<button>Serializa a <code>List&lt;Bloco&gt;</code> em string JSON, na hora de SALVAR</button>
+<button>Desserializa a string em <code>List&lt;Bloco&gt;</code>, na hora de LER</button>
+<button>Compara o valor atual com o snapshot pra detectar mudança</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>3.</strong> Sem o <code>ValueComparer</code>, que bug aparece?</p>
+<button>O EF lança uma exceção ao tentar salvar a lista</button>
+<button>A coluna é criada como <code>text</code> em vez de <code>jsonb</code></button>
+<button>Mutação dentro da lista não é detectada e não é salva — sem erro nenhum</button>
+<div class="fb"></div>
+</div>
 
 <hr>
 <p class="sub">
@@ -87,5 +105,16 @@ Anterior: <a href="0001-ef-core-mapping.html">Aula 01 — Mapeamento EF Core</a>
 Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
 </p>
 
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
 </body>
 </html>

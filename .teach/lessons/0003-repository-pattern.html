@@ -92,13 +92,31 @@ Tudo fica numa <strong>extension method</strong> <code>AddPersistence()</code>, 
 mora na camada dona dela, não vaza pro host.
 </p>
 
-<h2>5. Checkpoint</h2>
-<p>Responde as três pro seu professor (o agente):</p>
-<ol>
-<li>Por que a <em>interface</em> vai no Domain e a <em>classe</em> no Persistence — o que quebraria se invertesse?</li>
-<li>Por que <code>AdicionarAsync</code> não chama <code>SaveChanges</code>?</li>
-<li>O que <code>AddScoped&lt;IPostRepository, PostRepository&gt;()</code> faz quando alguém pede <code>IPostRepository</code>?</li>
-</ol>
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que a interface vai no Domain e a classe no Persistence — o que quebraria se invertesse?</p>
+<button>A interface ficaria mais lenta em tempo de execução</button>
+<button>O Domain passaria a depender do EF Core, quebrando a Clean Architecture</button>
+<button>O container de DI não conseguiria achar a implementação</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>AdicionarAsync</code> não chama <code>SaveChanges</code>?</p>
+<button>Porque o EF grava sozinho ao fim de todo request HTTP</button>
+<button>Porque <code>SaveChanges</code> só existe em queries de leitura</button>
+<button>Porque o commit é do <code>UnitOfWorkBehavior</code>, atômico por comando</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> O que <code>AddScoped&lt;IPostRepository, PostRepository&gt;()</code> faz quando alguém pede <code>IPostRepository</code>?</p>
+<button>O container cria um <code>PostRepository</code> e injeta o <code>DbContext</code> nele</button>
+<button>Cria uma única instância global compartilhada por toda a aplicação</button>
+<button>Executa o <code>SaveChanges</code> no fim do escopo do request</button>
+<div class="fb"></div>
+</div>
 
 <hr>
 <p class="sub">
@@ -111,5 +129,16 @@ Anterior: <a href="0002-jsonb-hasconversion.html">Aula 02 — jsonb via HasConve
 Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
 </p>
 
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
 </body>
 </html>
