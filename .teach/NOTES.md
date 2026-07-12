@@ -13,6 +13,9 @@
 - [x] Fatia 3 — Repository pattern + DI (aula 0003). Interfaces no Domain, 4 impls
   esqueleto no Persistence, `AddPersistence()` no Program.cs. Build verde.
   DbContext ainda fora da DI (vem na Fatia 4).
+- [x] Fatia 4 — Migration inicial + seed + AddDbContext (aula 0004). DbContext na DI,
+  seed HasData (Antonio/Jéssica), migration `InicialSchema` gerada e conferida.
+  Falta só `database update` contra Supabase real (passo de infra do usuário).
 
 ## Observações técnicas encontradas
 - `Usuario.IsAdmin` na entidade tem default `true`, mas schema/ticket pede coluna
