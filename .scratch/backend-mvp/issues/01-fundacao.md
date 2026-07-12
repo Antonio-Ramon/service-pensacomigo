@@ -11,7 +11,7 @@ Persistence:
 - [x] Contadores desnormalizados em `posts`; `comentarios.parent_id` auto-referência; `likes` unique `(post_id, viewer_hash)`; `usuarios.is_admin` default `false`; **sem** índice GIN
 - [x] `Post.Conteudo` (`List<Bloco>`) persiste em coluna `jsonb` via conversor manual (`HasConversion` + `JsonSerializer`), tratado como blob
 - [x] Interfaces (`IPostRepository`, `IComentarioRepository`, `IUsuarioRepository`, `ITagRepository`) no Domain + implementações esqueleto no Persistence (métodos crescem por fatia)
-- [x] Migration inicial + seed `UsuariosSeed` (Antonio, Jéssica) — gerada; `database update` pendente de Postgres/Supabase real
+- [x] Migration inicial + seed `UsuariosSeed` (Antonio Ramon, Jessica Rose) — aplicada no Supabase (`database update` verde)
 - [x] Conexão Supabase: `AddDbContext` + connection string `Default` via user-secrets. Porta 5432 direta p/ migration e runtime (tráfego baixo); pooler 6543 só se escalar. `SSL Mode=Require`
 
 Spine Web/Application:
