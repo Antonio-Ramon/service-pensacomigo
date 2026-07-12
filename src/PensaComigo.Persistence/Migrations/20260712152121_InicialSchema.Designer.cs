@@ -12,7 +12,7 @@ using PensaComigo.Persistence;
 namespace PensaComigo.Persistence.Migrations
 {
     [DbContext(typeof(PensaComigoDbContext))]
-    [Migration("20260711202244_InicialSchema")]
+    [Migration("20260712152121_InicialSchema")]
     partial class InicialSchema
     {
         /// <inheritdoc />
@@ -264,16 +264,16 @@ namespace PensaComigo.Persistence.Migrations
                             Email = "antonio-ramon-dev@outlook.com",
                             ImagemUrl = "",
                             IsAdmin = true,
-                            Nome = "Antonio"
+                            Nome = "Antonio Ramon"
                         },
                         new
                         {
                             Id = new Guid("a1000000-0000-0000-0000-000000000002"),
                             DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
-                            Email = "jessica@pensacomigo.app",
+                            Email = "jessicarosesc@gmail.com",
                             ImagemUrl = "",
                             IsAdmin = true,
-                            Nome = "Jéssica"
+                            Nome = "Jessica Rose"
                         });
                 });
 

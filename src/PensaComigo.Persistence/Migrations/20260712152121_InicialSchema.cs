@@ -149,8 +149,8 @@ namespace PensaComigo.Persistence.Migrations
                 columns: new[] { "id", "data_criacao", "email", "google_id", "imagem_url", "is_admin", "nome" },
                 values: new object[,]
                 {
-                    { new Guid("a1000000-0000-0000-0000-000000000001"), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "antonio-ramon-dev@outlook.com", null, "", true, "Antonio" },
-                    { new Guid("a1000000-0000-0000-0000-000000000002"), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "jessica@pensacomigo.app", null, "", true, "Jéssica" }
+                    { new Guid("a1000000-0000-0000-0000-000000000001"), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "antonio-ramon-dev@outlook.com", null, "", true, "Antonio Ramon" },
+                    { new Guid("a1000000-0000-0000-0000-000000000002"), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "jessicarosesc@gmail.com", null, "", true, "Jessica Rose" }
                 });
 
             migrationBuilder.CreateIndex(
