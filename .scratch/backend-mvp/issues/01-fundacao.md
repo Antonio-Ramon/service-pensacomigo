@@ -16,7 +16,7 @@ Persistence:
 
 Spine Web/Application:
 - [x] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
-- [ ] `ExceptionHandlingMiddleware` mapeando exceções tipadas → 404 / 422 / 429; erros de FluentValidation no mesmo pipe; controllers magros
+- [x] `GlobalExceptionHandler` (`IExceptionHandler` nativo) mapeando exceções tipadas → 404 / 422; erros de FluentValidation no mesmo pipe; ProblemDetails RFC 7807. 429 fica p/ quando houver rate limiter
 - [ ] Swagger/OpenAPI + versionamento `/api/v1`
 - [ ] Config JwtBearer (validação de token nas rotas de escrita)
 - [ ] `public partial class Program {}` no fim do `Program.cs`

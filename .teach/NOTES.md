@@ -19,6 +19,12 @@
 - [x] Fatia 5 — Pipeline MediatR (aula 0005). 3 behaviors (Logging/Validation/UnitOfWork),
   marcadores CQRS (`ICommand`/`IQuery`/`IBaseCommand`), ponte `IUnitOfWork` (DbContext).
   `AddApplication()` no Program. Build verde. Sem Command/validator real ainda — é o trilho.
+- [x] Fatia 6 — ExceptionHandling + exceções tipadas (aula 0006). `NaoEncontradoException`(404)
+  e `RegraDeNegocioException`(422) no Domain; `GlobalExceptionHandler : IExceptionHandler`
+  (nativo .NET, NÃO middleware manual) casa tipo→status via switch, emite ProblemDetails RFC 7807.
+  `ValidationException`(FluentValidation)→422 com erros campo-a-campo. `AddProblemDetails` +
+  `AddExceptionHandler` + `app.UseExceptionHandler()`. Build verde. **429 ficou fora** (sem
+  rate limiter ainda). Sem controller p/ exercitar de ponta a ponta — vem na Fatia 8 (harness).
 
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a

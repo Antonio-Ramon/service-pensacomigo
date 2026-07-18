@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 06 — ExceptionHandling + exceções tipadas</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Uma exceção, um status HTTP</h1>
+<p class="sub">Aula 06 · Fatia 6 do Ticket 01 · IExceptionHandler, ProblemDetails e exceções tipadas</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como o handler <em>lança</em> uma exceção
+com significado de domínio (<code>NaoEncontradoException</code>) e um único ponto central
+traduz isso pro HTTP certo (404) — sem <code>try/catch</code> espalhado nem controller
+decidindo status.
+</div>
+
+<h2>1. O problema: onde vai o try/catch?</h2>
+<p>
+Todo caso de uso pode falhar: post não existe, regra violada, request inválido. A tentação
+é <code>try/catch</code> em cada controller decidindo o status. Isso <strong>espalha</strong>
+a mesma lógica e mistura HTTP com regra. A Clean Architecture quer o contrário:
+</p>
+<ul>
+<li>A <strong>Application/Domain</strong> só sabe <em>lançar</em> a exceção certa — ela não conhece HTTP.</li>
+<li>A <strong>Web</strong> tem <em>um</em> tradutor: exceção tipada → status code.</li>
+</ul>
+
+<h2>2. Exceções tipadas (moram no Domain)</h2>
+<p>
+Não é qualquer <code>throw new Exception("...")</code>. O <em>tipo</em> carrega o significado —
+é o que o tradutor vai casar depois:
+</p>
+<pre><code><span class="cmt">// Domain/Exceptions — o tipo É a informação</span>
+public sealed class NaoEncontradoException(string recurso, object chave)
+    : Exception($"{recurso} '{chave}' não encontrado.");   <span class="cmt">// → 404</span>
+
+public sealed class RegraDeNegocioException(string mensagem) : Exception(mensagem);  <span class="cmt">// → 422</span></code></pre>
+<p>
+Um handler futuro faz só: <code>throw new NaoEncontradoException("Post", id);</code>. Ele não
+sabe nem se importa que isso vira 404.
+</p>
+
+<h2>3. O tradutor: IExceptionHandler (nativo do .NET)</h2>
+<p>
+Desde o .NET 8 não precisamos escrever middleware na mão. A plataforma já dá a interface
+<code>IExceptionHandler</code>. Implementamos <strong>uma</strong> classe:
+</p>
+<pre><code>public sealed class GlobalExceptionHandler(IProblemDetailsService pd, ILogger&lt;...&gt; log)
+    : IExceptionHandler
+{
+    public async ValueTask&lt;bool&gt; TryHandleAsync(HttpContext ctx, Exception ex, CancellationToken ct)
+    {
+        var (status, titulo) = ex switch          <span class="cmt">// o casamento por TIPO</span>
+        {
+            NaoEncontradoException  =&gt; (404, "Recurso não encontrado"),
+            ValidationException     =&gt; (422, "Validação falhou"),   <span class="cmt">// do FluentValidation</span>
+            RegraDeNegocioException =&gt; (422, "Regra de negócio violada"),
+            _                       =&gt; (500, "Erro interno"),        <span class="cmt">// desconhecida = bug</span>
+        };
+        ...
+    }
+}</code></pre>
+<p>
+O <code>switch</code> por padrão de tipo (<em>pattern matching</em>) é o coração: cada exceção
+conhecida vira um status; o <code>_</code> pega o resto como 500 (e aí sim a gente
+<strong>loga</strong> — 500 é bug nosso, os outros são fluxo esperado).
+</p>
+
+<h2>4. ProblemDetails: o corpo do erro (RFC 7807)</h2>
+<p>
+Não devolvemos texto solto. O padrão da web é <strong>ProblemDetails</strong> — um JSON
+com forma fixa (<code>status</code>, <code>title</code>, <code>detail</code>). O ASP.NET já
+serializa pra você via <code>IProblemDetailsService</code>. Para validação, empilhamos os
+erros campo-a-campo numa extensão:
+</p>
+<pre><code>problema.Extensions["erros"] = falhas.Errors
+    .GroupBy(e =&gt; e.PropertyName)
+    .ToDictionary(g =&gt; g.Key, g =&gt; g.Select(e =&gt; e.ErrorMessage).ToArray());</code></pre>
+<div class="card warn">
+Repara na ligação com a <strong>Aula 05</strong>: o <code>ValidationBehavior</code>
+<code>throw new ValidationException(falhas)</code> lá no pipeline. Ele não devolve 422 —
+só lança. Quem traduz pra 422 é <em>aqui</em>. Pipeline lança, handler traduz.
+</div>
+
+<h2>5. Ligando no Program.cs (native, 3 linhas)</h2>
+<pre><code>builder.Services.AddProblemDetails();                          <span class="cmt">// liga o serializador RFC 7807</span>
+builder.Services.AddExceptionHandler&lt;GlobalExceptionHandler&gt;(); <span class="cmt">// registra o tradutor</span>
+...
+app.UseExceptionHandler();   <span class="cmt">// põe o middleware nativo no pipe (bem no topo)</span></code></pre>
+<p>
+<code>UseExceptionHandler()</code> sem argumento usa nosso <code>IExceptionHandler</code>
+registrado. Nenhuma classe de middleware escrita à mão — só configuração.
+</p>
+
+<div class="card">
+<strong>Por que não escrevemos "ExceptionHandlingMiddleware"</strong> (como o ticket dizia)?
+Porque o <code>IExceptionHandler</code> nativo faz o mesmo com menos código e já integra
+com <code>ProblemDetails</code>. Reutilizar a plataforma &gt; reinventar middleware.
+O <strong>429</strong> (rate limit) ficou de fora: não há limitador ainda — entra quando existir.
+</div>
+
+<h2>6. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> Por que a <code>NaoEncontradoException</code> mora no Domain e não na Web?</p>
+<button>Porque o Domain é o único projeto que pode referenciar o ASP.NET Core</button>
+<button>Porque exceções precisam ficar perto do Program.cs que as registra</button>
+<button>Porque o handler só lança significado; traduzir pra 404 é papel da Web</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> O que o <code>switch</code> do <code>GlobalExceptionHandler</code> casa?</p>
+<button>O tipo da exceção lançada, mapeando cada um a um status HTTP</button>
+<button>A mensagem de texto da exceção, procurando palavras como "não encontrado"</button>
+<button>Um atributo <code>[StatusCode(404)]</code> posto na classe da exceção</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Quem transforma a <code>ValidationException</code> do pipeline em 422?</p>
+<button>O próprio <code>ValidationBehavior</code>, que já escreve o status na resposta</button>
+<button>O <code>GlobalExceptionHandler</code>, que casa o tipo e devolve 422</button>
+<button>O FluentValidation, que fala HTTP e serializa o ProblemDetails sozinho</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que só a exceção que cai no <code>_</code> (500) é logada?</p>
+<button>Porque logar 404 e 422 estoura o limite de logs do ASP.NET</button>
+<button>Porque o ProblemDetails já loga sozinho os status abaixo de 500</button>
+<button>Porque 404/422 são fluxo esperado; só o 500 é bug nosso a investigar</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling#iexceptionhandler">ASP.NET Core — IExceptionHandler (Microsoft)</a>
+· <a href="https://learn.microsoft.com/en-us/aspnet/core/web-api/handle-errors#problem-details">Problem Details (RFC 7807)</a>
+· <a href="https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/patterns">Pattern matching em C#</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0005-pipeline-mediatr.html">Aula 05 — Pipeline MediatR + CQRS</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>
