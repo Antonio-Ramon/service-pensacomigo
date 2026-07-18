@@ -16,6 +16,14 @@
 - [x] Fatia 4 — Migration inicial + seed + AddDbContext (aula 0004). DbContext na DI,
   seed HasData (Antonio/Jéssica), migration `InicialSchema` gerada e conferida.
   Falta só `database update` contra Supabase real (passo de infra do usuário).
+- [x] Fatia 5 — Pipeline MediatR (aula 0005). 3 behaviors (Logging/Validation/UnitOfWork),
+  marcadores CQRS (`ICommand`/`IQuery`/`IBaseCommand`), ponte `IUnitOfWork` (DbContext).
+  `AddApplication()` no Program. Build verde. Sem Command/validator real ainda — é o trilho.
+
+## Cuidado ao montar quiz
+- `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
+  posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
+  bater com o `data-a` antes de entregar.
 
 ## Observações técnicas encontradas
 - `Usuario.IsAdmin` na entidade tem default `true`, mas schema/ticket pede coluna

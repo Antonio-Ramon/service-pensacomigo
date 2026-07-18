@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 05 — Pipeline MediatR + CQRS</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>A cebola de behaviors do MediatR</h1>
+<p class="sub">Aula 05 · Fatia 5 do Ticket 01 · Pipeline behaviors, CQRS e Unit of Work</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como log, validação e commit saem de
+dentro de cada handler e viram <em>middleware de mensagem</em> — e por que a
+<strong>ordem</strong> dos behaviors e o marcador <code>ICommand</code> decidem tudo.
+</div>
+
+<h2>1. Request → Handler, e o que embrulha isso</h2>
+<p>
+No MediatR, cada caso de uso é uma <strong>mensagem</strong> (<code>IRequest&lt;T&gt;</code>)
+tratada por um único <code>Handler</code>. Um <strong>behavior</strong>
+(<code>IPipelineBehavior</code>) é um middleware que embrulha esse handler — idêntico ao
+middleware HTTP, mas para mensagens. Todo request atravessa uma <em>cebola</em> de behaviors,
+e a resposta volta pela mesma cebola:
+</p>
+<pre><code>Request → Logging → Validation → UnitOfWork → HANDLER
+                                             ↓
+Response ← Logging ← Validation ← UnitOfWork ←┘</code></pre>
+<p>
+Cada behavior recebe um <code>next</code>. Chamou <code>next()</code> → continua pra dentro.
+Não chamou (ex.: validação falhou) → corta o fluxo ali. É isso que tira código transversal
+de dentro de cada handler.
+</p>
+
+<h2>2. A assinatura de um behavior</h2>
+<pre><code>public class LoggingBehavior&lt;TRequest, TResponse&gt;(ILogger&lt;...&gt; logger)
+    : IPipelineBehavior&lt;TRequest, TResponse&gt; where TRequest : notnull
+{
+    public async Task&lt;TResponse&gt; Handle(
+        TRequest request, RequestHandlerDelegate&lt;TResponse&gt; next, CancellationToken ct)
+    {
+        logger.LogInformation("Tratando {Request}", typeof(TRequest).Name);
+        var resposta = await next(ct);   <span class="cmt">// chama o próximo elo (ou o handler)</span>
+        logger.LogInformation("Tratado {Request}", typeof(TRequest).Name);
+        return resposta;
+    }
+}</code></pre>
+<p>
+É <strong>genérico aberto</strong> (<code>&lt;,&gt;</code>): um mesmo behavior serve para
+<em>toda</em> mensagem do sistema. Registramos com <code>AddOpenBehavior(typeof(LoggingBehavior&lt;,&gt;))</code>.
+</p>
+
+<h2>3. Por que a ordem importa</h2>
+<p>
+A ordem de registro <strong>é</strong> a ordem de execução (mais externo primeiro):
+</p>
+<pre><code>cfg.AddOpenBehavior(typeof(LoggingBehavior&lt;,&gt;));      <span class="cmt">// mais externo</span>
+cfg.AddOpenBehavior(typeof(ValidationBehavior&lt;,&gt;));
+cfg.AddOpenBehavior(typeof(UnitOfWorkBehavior&lt;,&gt;));   <span class="cmt">// mais interno, colado no handler</span></code></pre>
+<ul>
+<li><strong>Logging por fora</strong> → registra tudo, até o que morre na validação.</li>
+<li><strong>Validation no meio</strong> → se o request é inválido, <code>throw</code> antes de tocar no banco.</li>
+<li><strong>UnitOfWork por dentro</strong> → só commita <em>depois</em> que o handler rodou com sucesso.</li>
+</ul>
+
+<h2>4. CQRS: por que o UnitOfWork precisa saber Command vs Query</h2>
+<p>
+<strong>CQRS</strong> = separar <em>Command</em> (escreve) de <em>Query</em> (lê). Dar
+<code>SaveChanges</code> numa leitura é puro desperdício. Então o
+<code>UnitOfWorkBehavior</code> só commita em Commands. Como ele distingue? Um marcador:
+</p>
+<pre><code>public interface IBaseCommand;                                 <span class="cmt">// só para o teste `is`</span>
+public interface ICommand&lt;out T&gt; : IRequest&lt;T&gt;, IBaseCommand;   <span class="cmt">// escrita</span>
+public interface IQuery&lt;out T&gt;   : IRequest&lt;T&gt;;                  <span class="cmt">// leitura</span></code></pre>
+<pre><code>if (request is not IBaseCommand)
+    return await next(ct);          <span class="cmt">// Query: passa sem commit</span>
+
+var resposta = await next(ct);
+await uow.CommitAsync(ct);          <span class="cmt">// Command: commita ao fim</span>
+return resposta;</code></pre>
+
+<h2>5. A ponte Unit of Work (a regra da Clean Architecture)</h2>
+<p>
+O behavior mora na <strong>Application</strong>, que só conhece o Domain — nunca o EF. Mas
+quem salva é o <code>DbContext</code> (Persistence). A ponte é uma interface no Domain:
+</p>
+<pre><code><span class="cmt">// Domain — a abstração</span>
+public interface IUnitOfWork { Task&lt;int&gt; CommitAsync(CancellationToken ct = default); }
+
+<span class="cmt">// Persistence — o DbContext JÁ é a unidade de trabalho</span>
+public class PensaComigoDbContext : DbContext, IUnitOfWork
+{
+    public Task&lt;int&gt; CommitAsync(CancellationToken ct = default) =&gt; SaveChangesAsync(ct);
+}</code></pre>
+<div class="card warn">
+Na DI, registramos <code>IUnitOfWork</code> apontando para a <em>mesma instância</em> Scoped do
+DbContext: <code>AddScoped&lt;IUnitOfWork&gt;(sp =&gt; sp.GetRequiredService&lt;PensaComigoDbContext&gt;())</code>.
+Se registrasse um <code>new</code>, os repositórios rastreariam mudanças num contexto e o
+commit sairia noutro — nada seria salvo.
+</div>
+<p>
+Repara: os <code>PostRepository</code> etc. <strong>não</strong> chamam <code>SaveChanges</code>
+(o comentário "fica pro UnitOfWorkBehavior" da Fatia 3). Eles só rastreiam
+(<code>AddAsync</code>); o commit único e atômico acontece uma vez, no fim, pelo behavior.
+</p>
+
+<h2>6. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que o <code>LoggingBehavior</code> é registrado antes do <code>ValidationBehavior</code>?</p>
+<button>Porque validação é mais cara e deve rodar por último no pipeline sempre</button>
+<button>Porque o mais externo roda primeiro, então o log cobre até requests inválidos</button>
+<button>Porque o MediatR exige que todo behavior de log seja o primeiro da lista</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>2.</strong> Como o <code>UnitOfWorkBehavior</code> decide se deve chamar <code>CommitAsync</code>?</p>
+<button>Ele commita sempre e o EF ignora o SaveChanges quando não há mudança</button>
+<button>Ele testa <code>request is IBaseCommand</code>: só Commands commitam, Queries passam</button>
+<button>Ele lê um atributo <code>[Command]</code> na classe do request via reflection</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que <code>IUnitOfWork</code> aponta para a mesma instância Scoped do DbContext?</p>
+<button>Pra que rastreio dos repositórios e o commit ocorram no mesmo contexto</button>
+<button>Porque criar um segundo DbContext estoura o limite de conexões do Postgres</button>
+<button>Porque o MediatR só injeta serviços registrados como instância única global</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://github.com/jbogard/MediatR/wiki/Behaviors">MediatR Wiki — Behaviors (Jimmy Bogard)</a>
+· CQRS: <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/cqrs">CQRS pattern (Microsoft)</a>
+· <a href="https://learn.microsoft.com/en-us/dotnet/architecture/microservices/microservice-ddd-cqrs-patterns/">.NET microservices — DDD/CQRS</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0004-migration-seed-conexao.html">Aula 04 — Migration, Seed e Conexão</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

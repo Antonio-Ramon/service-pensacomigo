@@ -15,7 +15,7 @@ Persistence:
 - [x] Conexão Supabase: `AddDbContext` + connection string `Default` via user-secrets. Porta 5432 direta p/ migration e runtime (tráfego baixo); pooler 6543 só se escalar. `SSL Mode=Require`
 
 Spine Web/Application:
-- [ ] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
+- [x] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
 - [ ] `ExceptionHandlingMiddleware` mapeando exceções tipadas → 404 / 422 / 429; erros de FluentValidation no mesmo pipe; controllers magros
 - [ ] Swagger/OpenAPI + versionamento `/api/v1`
 - [ ] Config JwtBearer (validação de token nas rotas de escrita)
