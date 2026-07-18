@@ -13,6 +13,9 @@ public static class DependencyInjection
         services.AddDbContext<PensaComigoDbContext>(opt =>
             opt.UseNpgsql(config.GetConnectionString("Default")));
 
+        // O DbContext É a unidade de trabalho; expõe a mesma instância como IUnitOfWork.
+        services.AddScoped<IUnitOfWork>(sp => sp.GetRequiredService<PensaComigoDbContext>());
+
         services.AddScoped<IPostRepository, PostRepository>();
         services.AddScoped<IComentarioRepository, ComentarioRepository>();
         services.AddScoped<IUsuarioRepository, UsuarioRepository>();
