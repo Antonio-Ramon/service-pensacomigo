@@ -17,8 +17,8 @@ Persistence:
 Spine Web/Application:
 - [x] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
 - [x] `GlobalExceptionHandler` (`IExceptionHandler` nativo) mapeando exceções tipadas → 404 / 422; erros de FluentValidation no mesmo pipe; ProblemDetails RFC 7807. 429 fica p/ quando houver rate limiter
-- [ ] Swagger/OpenAPI + versionamento `/api/v1`
-- [ ] Config JwtBearer (validação de token nas rotas de escrita)
+- [x] Swagger/OpenAPI (com botão Authorize/Bearer) + versionamento `/api/v1` via convenção de rota (`[Route("api/v1/[controller]")]`; lib `Asp.Versioning` só quando existir v2)
+- [x] Config JwtBearer: valida JWT próprio (chave simétrica, todos `Validate*` on), `UseAuthentication` antes de `UseAuthorization`. `[Authorize]` nas rotas de escrita entra com os controllers
 - [ ] `public partial class Program {}` no fim do `Program.cs`
 - [ ] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real)
 

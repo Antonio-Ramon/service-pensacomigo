@@ -19,6 +19,12 @@
 - [x] Fatia 5 — Pipeline MediatR (aula 0005). 3 behaviors (Logging/Validation/UnitOfWork),
   marcadores CQRS (`ICommand`/`IQuery`/`IBaseCommand`), ponte `IUnitOfWork` (DbContext).
   `AddApplication()` no Program. Build verde. Sem Command/validator real ainda — é o trilho.
+- [x] Fatia 7 — Swagger + JWT + versionamento (aula 0007). `AddAuthentication/AddJwtBearer`
+  valida JWT PRÓPRIO (chave simétrica, `Jwt:Key` via user-secrets), todos `Validate*` on.
+  `UseAuthentication` antes de `UseAuthorization`. Swagger com botão Authorize (Bearer).
+  **Versionamento = convenção de rota** `[Route("api/v1/[controller]")]`; lib `Asp.Versioning`
+  adiada até existir v2. Build + boot verdes. Swashbuckle 10 usa OpenApi 2.x (churn de API
+  resolvido: ns `Microsoft.OpenApi`, `OpenApiSecuritySchemeReference`, AddSecurityRequirement=factory).
 - [x] Fatia 6 — ExceptionHandling + exceções tipadas (aula 0006). `NaoEncontradoException`(404)
   e `RegraDeNegocioException`(422) no Domain; `GlobalExceptionHandler : IExceptionHandler`
   (nativo .NET, NÃO middleware manual) casa tipo→status via switch, emite ProblemDetails RFC 7807.
