@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** in-progress
+**Status:** done (código completo; smoke test roda verde com Docker no ar)
 
 Persistence:
 - [x] `PensaComigoDbContext` com `EntityTypeConfiguration` de todas as entidades conforme schema §5.4
@@ -19,7 +19,7 @@ Spine Web/Application:
 - [x] `GlobalExceptionHandler` (`IExceptionHandler` nativo) mapeando exceções tipadas → 404 / 422; erros de FluentValidation no mesmo pipe; ProblemDetails RFC 7807. 429 fica p/ quando houver rate limiter
 - [x] Swagger/OpenAPI (com botão Authorize/Bearer) + versionamento `/api/v1` via convenção de rota (`[Route("api/v1/[controller]")]`; lib `Asp.Versioning` só quando existir v2)
 - [x] Config JwtBearer: valida JWT próprio (chave simétrica, todos `Validate*` on), `UseAuthentication` antes de `UseAuthorization`. `[Authorize]` nas rotas de escrita entra com os controllers
-- [ ] `public partial class Program {}` no fim do `Program.cs`
-- [ ] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real)
+- [x] `public partial class Program {}` no fim do `Program.cs`
+- [x] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real). Smoke test verde exige Docker rodando (passo de infra do usuário)
 
 **Verificável:** migration aplica num Postgres via Testcontainers; API sobe; Swagger abre; teste de integração vazio roda verde.

@@ -25,6 +25,12 @@
   **Versionamento = convenção de rota** `[Route("api/v1/[controller]")]`; lib `Asp.Versioning`
   adiada até existir v2. Build + boot verdes. Swashbuckle 10 usa OpenApi 2.x (churn de API
   resolvido: ns `Microsoft.OpenApi`, `OpenApiSecuritySchemeReference`, AddSecurityRequirement=factory).
+- [x] Fatia 8 — Harness de integração (aula 0008). `public partial class Program;` expõe o tipo;
+  `WebApplicationFactory<Program>` + `Testcontainers.PostgreSql` sobem app+Postgres real; migration
+  aplicada no `IAsyncLifetime.InitializeAsync`; override só de `ConnectionStrings:Default` (DI intacta).
+  Smoke test (seed Antonio/Jessica). Build verde. **Docker não está nesta máquina** → teste não rodou
+  aqui (passo de infra). Choque de `DisposeAsync` (xunit Task vs WAF ValueTask) → interface explícita.
+  **Ticket 01 fechado no código.**
 - [x] Fatia 6 — ExceptionHandling + exceções tipadas (aula 0006). `NaoEncontradoException`(404)
   e `RegraDeNegocioException`(422) no Domain; `GlobalExceptionHandler : IExceptionHandler`
   (nativo .NET, NÃO middleware manual) casa tipo→status via switch, emite ProblemDetails RFC 7807.
