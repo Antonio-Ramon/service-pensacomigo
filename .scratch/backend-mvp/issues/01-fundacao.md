@@ -4,22 +4,22 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done (código completo; smoke test roda verde com Docker no ar)
 
 Persistence:
-- [ ] `PensaComigoDbContext` com `EntityTypeConfiguration` de todas as entidades conforme schema §5.4
-- [ ] Contadores desnormalizados em `posts`; `comentarios.parent_id` auto-referência; `likes` unique `(post_id, viewer_hash)`; `usuarios.is_admin` default `false`; **sem** índice GIN
-- [ ] `Post.Conteudo` (`List<Bloco>`) persiste em coluna `jsonb` via conversor manual (`HasConversion` + `JsonSerializer`), tratado como blob
-- [ ] Interfaces (`IPostRepository`, `IComentarioRepository`, `IUsuarioRepository`, `ITagRepository`) no Domain + implementações esqueleto no Persistence (métodos crescem por fatia)
-- [ ] Migration inicial + seed `UsuariosSeed` (Antonio, Jéssica)
-- [ ] Conexão Supabase: SSL obrigatório; direta (5432) para migration, pooled Supavisor (6543) para runtime
+- [x] `PensaComigoDbContext` com `EntityTypeConfiguration` de todas as entidades conforme schema §5.4
+- [x] Contadores desnormalizados em `posts`; `comentarios.parent_id` auto-referência; `likes` unique `(post_id, viewer_hash)`; `usuarios.is_admin` default `false`; **sem** índice GIN
+- [x] `Post.Conteudo` (`List<Bloco>`) persiste em coluna `jsonb` via conversor manual (`HasConversion` + `JsonSerializer`), tratado como blob
+- [x] Interfaces (`IPostRepository`, `IComentarioRepository`, `IUsuarioRepository`, `ITagRepository`) no Domain + implementações esqueleto no Persistence (métodos crescem por fatia)
+- [x] Migration inicial + seed `UsuariosSeed` (Antonio Ramon, Jessica Rose) — aplicada no Supabase (`database update` verde)
+- [x] Conexão Supabase: `AddDbContext` + connection string `Default` via user-secrets. Porta 5432 direta p/ migration e runtime (tráfego baixo); pooler 6543 só se escalar. `SSL Mode=Require`
 
 Spine Web/Application:
-- [ ] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
-- [ ] `ExceptionHandlingMiddleware` mapeando exceções tipadas → 404 / 422 / 429; erros de FluentValidation no mesmo pipe; controllers magros
-- [ ] Swagger/OpenAPI + versionamento `/api/v1`
-- [ ] Config JwtBearer (validação de token nas rotas de escrita)
-- [ ] `public partial class Program {}` no fim do `Program.cs`
-- [ ] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real)
+- [x] Behaviors MediatR: `ValidationBehavior`, `LoggingBehavior`, `UnitOfWorkBehavior` (commit atômico só em Commands)
+- [x] `GlobalExceptionHandler` (`IExceptionHandler` nativo) mapeando exceções tipadas → 404 / 422; erros de FluentValidation no mesmo pipe; ProblemDetails RFC 7807. 429 fica p/ quando houver rate limiter
+- [x] Swagger/OpenAPI (com botão Authorize/Bearer) + versionamento `/api/v1` via convenção de rota (`[Route("api/v1/[controller]")]`; lib `Asp.Versioning` só quando existir v2)
+- [x] Config JwtBearer: valida JWT próprio (chave simétrica, todos `Validate*` on), `UseAuthentication` antes de `UseAuthorization`. `[Authorize]` nas rotas de escrita entra com os controllers
+- [x] `public partial class Program {}` no fim do `Program.cs`
+- [x] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real). Smoke test verde exige Docker rodando (passo de infra do usuário)
 
 **Verificável:** migration aplica num Postgres via Testcontainers; API sobe; Swagger abre; teste de integração vazio roda verde.

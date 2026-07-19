@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 07 — Swagger, JWT e versionamento</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Quem é você, e como eu te mostro isso?</h1>
+<p class="sub">Aula 07 · Fatia 7 do Ticket 01 · JwtBearer, Swagger com Authorize e versionamento de rota</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como o backend <em>valida</em> o JWT que ele
+mesmo emitiu (não o do Google), o que cada <code>Validate*</code> protege, e por que a
+<strong>ordem</strong> <code>UseAuthentication</code> → <code>UseAuthorization</code> não pode inverter.
+</div>
+
+<h2>1. Dois tokens diferentes (não confunda)</h2>
+<p>
+No Pensa Comigo há <strong>dois</strong> JWTs no fluxo — e esta fatia só cuida do segundo:
+</p>
+<ul>
+<li><strong>Token do Google</strong>: o frontend faz o OAuth, recebe esse token e manda pro
+backend <em>uma vez</em>, no login. Validá-lo é papel da <strong>Fatia 02</strong>.</li>
+<li><strong>JWT próprio</strong>: depois de reconhecer o usuário, o backend <em>emite o seu
+próprio</em> JWT, assinado com uma chave secreta nossa. Toda requisição seguinte manda esse.
+É esse que configuramos aqui pra validar.</li>
+</ul>
+<p>
+Por isso a chave é <strong>simétrica</strong> (<code>SymmetricSecurityKey</code>): quem assina
+e quem valida é a mesma parte — nós. Segredo único, via <em>user-secrets</em> (nunca no git).
+</p>
+
+<h2>2. Configurar a validação (e o que cada linha protege)</h2>
+<pre><code>builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =&gt; options.TokenValidationParameters = new()
+    {
+        ValidateIssuer           = true,   <span class="cmt">// quem emitiu? tem que ser "pensacomigo"</span>
+        ValidateAudience         = true,   <span class="cmt">// pra quem? tem que ser nossa API</span>
+        ValidateLifetime         = true,   <span class="cmt">// expirou? recusa token vencido</span>
+        ValidateIssuerSigningKey = true,   <span class="cmt">// assinatura bate com NOSSA chave?</span>
+        ValidIssuer   = jwt["Issuer"],
+        ValidAudience = jwt["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!)),
+    });
+builder.Services.AddAuthorization();</code></pre>
+<div class="card warn">
+Aqui <strong>não</strong> se é lazy: cada <code>Validate*</code> fecha uma porta. Desligar
+<code>ValidateLifetime</code> aceita token eterno; desligar <code>ValidateIssuerSigningKey</code>
+aceita token forjado por qualquer um. Segurança é a exceção à regra do "código mínimo".
+</div>
+
+<h2>3. Authentication vs Authorization (a ordem no pipe)</h2>
+<pre><code>app.UseAuthentication();   <span class="cmt">// 1º: LÊ o token → descobre QUEM é (preenche User)</span>
+app.UseAuthorization();    <span class="cmt">// 2º: decide se ESSE quem PODE (checa [Authorize])</span></code></pre>
+<ul>
+<li><strong>Authentication</strong> = identidade. Lê o Bearer, valida, monta o <code>HttpContext.User</code>.</li>
+<li><strong>Authorization</strong> = permissão. Olha o <code>[Authorize]</code> da rota contra esse User.</li>
+</ul>
+<p>
+Inverter é bug: autorizar antes de autenticar significa decidir permissão sobre um usuário
+ainda anônimo — toda rota protegida cairia como não-autorizada.
+</p>
+
+<h2>4. Swagger com botão "Authorize"</h2>
+<p>
+Swagger lê os endpoints e desenha a UI. Pra testar rota protegida, ele precisa saber
+<em>mandar</em> o Bearer. Declaramos o esquema uma vez:
+</p>
+<pre><code>options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme {
+    Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", In = Header });
+
+options.AddSecurityRequirement(_ =&gt; new OpenApiSecurityRequirement {
+    [new OpenApiSecuritySchemeReference("Bearer")] = [] });</code></pre>
+<p>
+O <em>definition</em> descreve o esquema; o <em>requirement</em> diz "aplique a todos".
+Aparece o cadeado <strong>Authorize</strong> no topo do Swagger — cola o token e ele acompanha
+cada chamada.
+</p>
+<div class="card">
+Detalhe de versão: Swashbuckle 10 usa Microsoft.OpenApi <strong>2.x</strong> — namespace virou
+<code>Microsoft.OpenApi</code> (sem <code>.Models</code>), referência agora é
+<code>OpenApiSecuritySchemeReference</code>, e <code>AddSecurityRequirement</code> recebe uma
+<em>factory</em> (<code>_ =&gt; ...</code>). Aprendizado real: bibliotecas mudam de forma entre versões.
+</div>
+
+<h2>5. Versionamento /api/v1 (por que NÃO instalamos lib)</h2>
+<p>
+O ticket pede <code>/api/v1</code>. A tentação é a lib <code>Asp.Versioning</code>. Mas só
+existe v1 e nem há controller ainda — instalar máquina de versão pra uma versão é peso morto.
+A escolha <strong>ponytail</strong>: quando o primeiro controller chegar, o prefixo é só uma rota:
+</p>
+<pre><code>[ApiController]
+[Route("api/v1/[controller]")]   <span class="cmt">// prefixo = convenção; lib entra SÓ quando v2 existir</span>
+public class PostsController : ControllerBase { ... }</code></pre>
+<p>
+Regra que se repete no curso: <em>native/convenção primeiro; dependência só quando ela paga o próprio peso.</em>
+</p>
+
+<h2>6. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Qual JWT esta fatia configura para validar?</p>
+<button>O token do Google, recebido do frontend a cada requisição autenticada</button>
+<button>O JWT próprio do backend, assinado com nossa chave simétrica secreta</button>
+<button>Ambos os tokens juntos, num único esquema de validação compartilhado</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>UseAuthentication</code> vem antes de <code>UseAuthorization</code>?</p>
+<button>Porque autorizar é mais lento e deve rodar por último para poupar tempo</button>
+<button>Porque o ASP.NET recusa o pipe se os dois não estiverem em ordem alfabética</button>
+<button>Porque primeiro se descobre quem é o usuário, depois se decide se ele pode</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> O que <code>ValidateIssuerSigningKey = true</code> protege?</p>
+<button>Recusa token cuja assinatura não bate com a nossa chave secreta</button>
+<button>Recusa token que já passou do prazo de expiração definido no exp</button>
+<button>Recusa token cujo campo de audiência aponta para outra aplicação</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que não instalamos a lib <code>Asp.Versioning</code> agora?</p>
+<button>Porque ela é paga e o projeto Pensa Comigo não tem orçamento para isso</button>
+<button>Porque o .NET 10 já traz versionamento de rota nativo embutido no framework</button>
+<button>Porque só há v1 e nem controller ainda; o prefixo é só uma convenção de rota</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authentication/jwt">ASP.NET Core — JWT bearer authentication (Microsoft)</a>
+· <a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/introduction">Authentication vs Authorization</a>
+· <a href="https://swagger.io/docs/specification/authentication/bearer-authentication/">Swagger — Bearer authentication</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0006-exception-handling.html">Aula 06 — Exception Handling</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

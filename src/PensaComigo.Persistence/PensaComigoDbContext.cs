@@ -1,14 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using PensaComigo.Domain.Entities;
+using PensaComigo.Domain.Repositories;
 
 namespace PensaComigo.Persistence;
 
-public class PensaComigoDbContext : DbContext
+public class PensaComigoDbContext : DbContext, IUnitOfWork
 {
     public PensaComigoDbContext(DbContextOptions<PensaComigoDbContext> options)
         : base(options)
     {
     }
+
+    // IUnitOfWork: o commit atômico que o UnitOfWorkBehavior chama ao fim de um Command.
+    public Task<int> CommitAsync(CancellationToken ct = default) => SaveChangesAsync(ct);
 
     public DbSet<Usuario> Usuarios => Set<Usuario>();
     public DbSet<Post> Posts => Set<Post>();

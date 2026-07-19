@@ -26,5 +26,27 @@ public class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
         builder.HasMany(u => u.Posts)
                .WithOne(p => p.Autor)
                .HasForeignKey(p => p.AutorId);
+
+        // Seed dos autores. Guid e DataCriacao FIXOS: HasData exige PK constante e
+        // valor explícito para colunas obrigatórias (o now() default não vale aqui).
+        builder.HasData(
+            new Usuario
+            {
+                Id = new Guid("a1000000-0000-0000-0000-000000000001"),
+                Nome = "Antonio Ramon",
+                Email = "antonio-ramon-dev@outlook.com",
+                ImagemUrl = "",
+                IsAdmin = true,
+                DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            },
+            new Usuario
+            {
+                Id = new Guid("a1000000-0000-0000-0000-000000000002"),
+                Nome = "Jessica Rose",
+                Email = "jessicarosesc@gmail.com",
+                ImagemUrl = "",
+                IsAdmin = true,
+                DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            });
     }
 }

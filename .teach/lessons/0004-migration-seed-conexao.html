@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 04 — Migration, Seed e Conexão</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Do modelo C# para tabelas reais no Postgres</h1>
+<p class="sub">Aula 04 · Fatia 4 do Ticket 01 · Migrations, seed com HasData e a conexão Supabase</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como o EF transforma suas classes +
+configs numa <em>migration</em> (script versionado), como plantar dados iniciais
+(<code>HasData</code>) e por que a conexão Supabase usa <strong>duas portas</strong>.
+</div>
+
+<h2>1. O que é uma migration</h2>
+<p>
+Você nunca escreve <code>CREATE TABLE</code> na mão. O EF compara dois estados:
+o <strong>snapshot</strong> do modelo anterior (arquivo <code>...ModelSnapshot.cs</code>)
+com o modelo atual (entidades + configs). A diferença vira uma migration:
+</p>
+<pre><code>dotnet ef migrations add InicialSchema \
+  -p src/PensaComigo.Persistence \   <span class="cmt">onde a migration é gravada</span>
+  -s src/PensaComigo.Web             <span class="cmt">startup: de onde vem a connection string</span></code></pre>
+<p>
+Isso gera uma classe com <code>Up()</code> (aplica) e <code>Down()</code> (reverte).
+<strong>Nada toca o banco ainda</strong> — <code>migrations add</code> é offline, só lê
+seu código. Quem escreve no Postgres é o passo seguinte:
+</p>
+<pre><code>dotnet ef database update -p src/PensaComigo.Persistence -s src/PensaComigo.Web</code></pre>
+
+<h2>2. De onde o EF acha o DbContext (design-time)</h2>
+<p>
+Repara no <code>-s Web</code>: em <em>design time</em> o EF sobe o <code>Program.cs</code>,
+lê a DI e pega o <code>PensaComigoDbContext</code> registrado lá. Por isso a Fatia 4
+finalmente registra o contexto no container — o que faltava desde a Fatia 3:
+</p>
+<pre><code><span class="cmt">// Persistence/DependencyInjection.cs — agora recebe IConfiguration</span>
+services.AddDbContext&lt;PensaComigoDbContext&gt;(opt =&gt;
+    opt.UseNpgsql(config.GetConnectionString("Default")));</code></pre>
+<p>
+Sem esse registro, <code>dotnet ef</code> reclamaria "No DbContext was found".
+<code>AddDbContext</code> já registra o contexto como <code>Scoped</code> (um por request) —
+o mesmo tempo de vida dos repositórios que dependem dele.
+</p>
+
+<h2>3. Seed idempotente com <code>HasData</code></h2>
+<p>
+Os autores Antonio e Jéssica não são "dados de teste" — são parte do schema. Usamos
+<code>HasData</code> na configuration, então o seed <strong>entra na própria migration</strong>
+(vira <code>INSERT</code> no <code>Up()</code>) e roda uma vez só, sem duplicar:
+</p>
+<pre><code>builder.HasData(
+    new Usuario { Id = <span class="cmt">/* Guid FIXO */</span>, Nome = "Antonio", ... });</code></pre>
+<div class="card warn">
+<code>HasData</code> exige <strong>chave primária fixa</strong> (um <code>Guid</code> literal, não
+<code>Guid.NewGuid()</code>) — senão toda migration acharia que o registro "mudou". E toda
+coluna obrigatória precisa de valor explícito, inclusive <code>DataCriacao</code>: o
+<code>now()</code> default do banco não vale para linhas semeadas.
+</div>
+
+<h2>4. A conexão Supabase: uma porta só (nesta escala)</h2>
+<p>
+O Supabase oferece duas portas — <strong>5432 direta</strong> e <strong>6543 pooled</strong>
+(Supavisor). A pooled existe para tráfego alto: centenas de conexões curtas simultâneas
+(serverless). Este projeto tem 2 autores e tráfego baixo, então usamos a
+<strong>direta 5432 para tudo</strong> — migration e runtime. Uma connection string só.
+</p>
+<div class="card warn">
+Por que <em>não</em> a pooled para migration: o pooler em <em>transaction mode</em> quebra
+prepared statements e comandos de sessão que o EF usa no DDL. Ficando na direta, esse
+problema nem aparece. Só se o tráfego crescer você migra para 6543 — e aí ajusta o Npgsql
+(desligar prepared statements). Enquanto for direta, ignora.
+</div>
+<p>
+<code>SSL Mode=Require</code> sempre — Supabase recusa texto puro. A string vai no
+<strong><code>user-secrets</code></strong> (fica na sua máquina, fora do git), que sobrepõe o
+<code>appsettings.json</code> em Development. Segredo real <strong>nunca</strong> é commitado.
+</p>
+
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> O que <code>dotnet ef migrations add</code> faz com o banco de dados?</p>
+<button>Aplica o script direto, criando as tabelas no Postgres na hora</button>
+<button>Nada — só compara modelo com snapshot e gera o script offline</button>
+<button>Conecta no banco só para ler o schema atual e comparar</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que o seed usa um <code>Guid</code> literal fixo e não <code>Guid.NewGuid()</code>?</p>
+<button>Porque <code>Guid.NewGuid()</code> não compila dentro de uma configuration</button>
+<button>Porque o Postgres não aceita Guid gerado fora do banco de dados</button>
+<button>Porque um Guid novo a cada build faria toda migration ver o registro como alterado</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que este projeto usa a porta 5432 direta para migration e runtime, sem o pooler?</p>
+<button>A porta 6543 não suporta comandos SSL exigidos pela migration</button>
+<button>Tráfego baixo dispensa o pool, e a direta evita o problema de DDL no pooler</button>
+<button>A porta 5432 é mais rápida e por isso serve melhor ao tráfego HTTP</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/">EF Core Migrations (Microsoft Learn)</a>
+· seed: <a href="https://learn.microsoft.com/en-us/ef/core/modeling/data-seeding">Data Seeding</a>
+· <a href="https://supabase.com/docs/guides/database/connecting-to-postgres">Connecting to Postgres (Supabase)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0003-repository-pattern.html">Aula 03 — Repository Pattern + DI</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

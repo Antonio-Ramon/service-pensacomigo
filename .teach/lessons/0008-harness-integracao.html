@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 08 — Harness de integração</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Testar a API inteira, contra um banco de verdade</h1>
+<p class="sub">Aula 08 · Fatia 8 do Ticket 01 · WebApplicationFactory + Testcontainers · última fatia da fundação</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender a diferença entre teste <em>unit</em> e teste
+<em>de integração</em>, e montar o <strong>harness</strong> que sobe o <code>Program.cs</code>
+inteiro apontado para um Postgres real e descartável — a base sobre a qual toda fatia de negócio
+(02+) vai ganhar teste verde de graça.
+</div>
+
+<h2>1. Unit vs integração</h2>
+<ul>
+<li><strong>Unit</strong>: testa uma classe isolada, sem framework, sem banco. Rápido, mas não
+prova que as peças se encaixam.</li>
+<li><strong>Integração</strong>: sobe a aplicação <em>inteira</em> — DI, pipeline MediatR, EF Core,
+migration, banco — e exercita de fora. Prova que o <em>conjunto</em> funciona.</li>
+</ul>
+<p>
+Regra do projeto: negócio se testa por integração. Se o handler grava no Postgres e lê de volta
+o <code>jsonb</code> certo, confiamos. Nada de mockar EF.
+</p>
+
+<h2>2. <code>WebApplicationFactory&lt;Program&gt;</code></h2>
+<p>
+Do pacote <code>Microsoft.AspNetCore.Mvc.Testing</code>. Ele instancia o seu
+<code>Program.cs</code> <strong>em memória</strong> (sem abrir porta de rede) e te dá um
+<code>HttpClient</code> que fala com a API como um cliente real — além de acesso à mesma
+<code>IServiceProvider</code> (a DI de produção).
+</p>
+<pre><code><span class="cmt">// no fim do Program.cs:</span>
+public partial class Program;</code></pre>
+<div class="card">
+Por que esse <code>partial</code>? Top-level statements (o <code>Program.cs</code> sem
+<code>class</code> explícita) geram um <code>Program</code> <strong>internal</strong>. O teste
+precisa <em>referenciar o tipo</em> em <code>WebApplicationFactory&lt;Program&gt;</code> —
+o <code>public partial class Program;</code> só o torna visível. Uma linha, zero lógica.
+</div>
+
+<h2>3. Testcontainers: Postgres real e descartável</h2>
+<p>
+Poderíamos apontar para SQLite em memória — mas aí não é o mesmo banco: sem <code>jsonb</code>,
+sem os defaults, sem o Npgsql. <strong>Testcontainers</strong> sobe um Postgres de verdade em
+Docker só para o teste e joga fora no fim. Mesmo provider, mesma migration que roda em produção.
+</p>
+<pre><code>private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
+    .WithImage("postgres:16-alpine")
+    .Build();</code></pre>
+
+<h2>4. Costurando os dois (a fábrica)</h2>
+<pre><code>protected override void ConfigureWebHost(IWebHostBuilder builder)
+{
+    <span class="cmt">// troca só a connection string; a DI de produção fica intacta</span>
+    builder.UseSetting("ConnectionStrings:Default", _postgres.GetConnectionString());
+}
+
+async Task IAsyncLifetime.InitializeAsync()
+{
+    await _postgres.StartAsync();                 <span class="cmt">// 1. sobe o container</span>
+    using var scope = Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService&lt;PensaComigoDbContext&gt;();
+    await db.Database.MigrateAsync();             <span class="cmt">// 2. aplica a migration nele</span>
+}</code></pre>
+<p>
+<code>AddPersistence</code> lê <code>GetConnectionString("Default")</code> só na hora de construir
+o <code>DbContext</code> — então basta <strong>sobrescrever a setting</strong> antes do build.
+Não mexemos na DI real; só desviamos o alvo. <code>IAsyncLifetime</code> é o gancho do xunit:
+<code>InitializeAsync</code> roda antes dos testes, e o par <code>DisposeAsync</code> destrói o container depois.
+</p>
+<div class="card warn">
+Detalhe que mordeu no caminho: o xunit v2 declara <code>IAsyncLifetime</code> com retorno
+<code>Task</code>, mas a base <code>WebApplicationFactory</code> já tem um <code>DisposeAsync</code>
+que retorna <code>ValueTask</code>. Dois <code>DisposeAsync</code> com assinatura diferente colidem.
+Solução: <strong>implementar a interface explicitamente</strong> (<code>async Task IAsyncLifetime.DisposeAsync()</code>) — cada lado fica com o seu.
+</div>
+
+<h2>5. O smoke test que prova a fundação</h2>
+<pre><code>public class SpineSmokeTests(PensaComigoApiFactory factory)
+    : IClassFixture&lt;PensaComigoApiFactory&gt;
+{
+    [Fact]
+    public async Task Migration_aplica_e_seed_de_usuarios_esta_presente()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService&lt;PensaComigoDbContext&gt;();
+        var nomes = await db.Usuarios.Select(u =&gt; u.Nome).ToListAsync();
+        Assert.Contains("Antonio Ramon", nomes);
+    }
+}</code></pre>
+<p>
+<code>IClassFixture</code> faz o xunit criar <strong>uma</strong> fábrica compartilhada por toda a
+classe (um container, não um por teste). Este teste toca a migration + o seed de ponta a ponta:
+se ele passa, a fundação está de pé.
+</p>
+<div class="card warn">
+<strong>Pré-requisito:</strong> Testcontainers precisa de <strong>Docker rodando</strong>. Sem
+Docker Desktop no ar, o teste não executa (o código compila igual). É passo de infra seu —
+como foi o <code>database update</code> no Supabase.
+</div>
+
+<h2>6. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> O que um teste de integração cobre que um unit não cobre?</p>
+<button>Ele roda mais rápido por não precisar carregar nenhuma classe do framework</button>
+<button>Ele sobe a aplicação inteira e prova que as peças realmente se encaixam</button>
+<button>Ele isola uma única classe e verifica o comportamento dela sem dependências</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que o <code>Program.cs</code> precisa de <code>public partial class Program;</code>?</p>
+<button>Porque sem ele a aplicação não consegue abrir a porta de rede durante o teste</button>
+<button>Porque o Testcontainers exige que a classe Program herde de uma base pública</button>
+<button>Porque top-level statements geram um Program internal, invisível ao teste</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que Postgres via Testcontainers em vez de SQLite em memória?</p>
+<button>É o mesmo banco de produção: jsonb, Npgsql e a migration real, sem divergência</button>
+<button>É mais rápido que qualquer alternativa e não depende de Docker estar instalado</button>
+<button>É a única forma de o xunit conseguir compartilhar a fábrica entre os testes</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Como o harness aponta a API para o banco do container?</p>
+<button>Reescrevendo o AddPersistence para receber a connection string por parâmetro fixo</button>
+<button>Removendo o DbContext da DI e registrando um novo apontado para o container</button>
+<button>Sobrescrevendo a setting ConnectionStrings:Default antes do build, DI intacta</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests">ASP.NET Core — Integration tests (Microsoft)</a>
+· <a href="https://dotnet.testcontainers.org/modules/postgres/">Testcontainers for .NET — PostgreSQL module</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0007-swagger-jwt-versionamento.html">Aula 07 — Swagger, JWT e versionamento</a>.
+Fim do Ticket 01 🎉 — próxima parada é a Fatia 02 (Auth Google + JWT), já com harness verde por baixo.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

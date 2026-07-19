@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 02 — List&lt;Bloco&gt; como coluna jsonb</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Guardando uma lista de objetos numa coluna só</h1>
+<p class="sub">Aula 02 · Fatia 2 do Ticket 01 · HasConversion, jsonb e ValueComparer</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> entender como <code>Post.Conteudo</code>
+(uma <code>List&lt;Bloco&gt;</code>) é persistida numa única coluna <code>jsonb</code> —
+e por que o <code>ValueComparer</code> não é opcional.
+</div>
+
+<h2>1. A pergunta</h2>
+<p>
+O EF Core mapeia <code>string</code>, <code>int</code>, <code>Guid</code> pra colunas
+sozinho. Mas <code>List&lt;Bloco&gt;</code> — uma lista de objetos com 11 campos cada —
+não tem tipo equivalente numa tabela. Duas saídas:
+</p>
+<table>
+<tr><th>Opção</th><th>Como</th><th>Custo</th></tr>
+<tr><td>Tabela <code>blocos</code></td><td>FK pro post, 1 linha por bloco</td><td>JOIN toda leitura</td></tr>
+<tr><td><strong>Coluna <code>jsonb</code></strong> ✓</td><td>serializa a lista inteira em JSON</td><td>não dá pra query dentro</td></tr>
+</table>
+<p>
+Escolhemos <code>jsonb</code> porque o bloco <strong>nunca é consultado sozinho</strong>:
+sempre carrega junto com o post, sempre inteiro. É um <em>blob</em> — guarda e recupera
+em bloco. Tabela separada só traria JOINs sem benefício.
+</p>
+
+<h2>2. As três peças (PostConfiguration.cs)</h2>
+
+<h3>a) <code>HasColumnType("jsonb")</code></h3>
+<p>
+Diz ao Postgres que a coluna é <code>jsonb</code> (JSON binário — validado e indexável
+pelo Postgres), não <code>text</code> cru.
+</p>
+
+<h3>b) <code>HasConversion(ida, volta)</code></h3>
+<p>O par de funções que traduz nos dois sentidos:</p>
+<pre><code>v =&gt; JsonSerializer.Serialize(v, opts),                          <span class="cmt">// ida: List&lt;Bloco&gt; → string, ao SALVAR</span>
+v =&gt; JsonSerializer.Deserialize&lt;List&lt;Bloco&gt;&gt;(v, opts) ?? new()   <span class="cmt">// volta: string → List&lt;Bloco&gt;, ao LER</span></code></pre>
+<p>
+No resto do código você mexe com <code>post.Conteudo</code> como lista normal. O EF roda
+<code>Serialize</code> ao gravar e <code>Deserialize</code> ao ler. A conversão é invisível.
+</p>
+
+<h3>c) <code>ValueComparer</code> — a peça não-óbvia</h3>
+<p>
+O EF detecta mudanças comparando o valor atual com um <strong>snapshot</strong> do que
+carregou. Pra <code>int</code>/<code>string</code> usa <code>==</code> e funciona. Mas
+<code>List&lt;Bloco&gt;</code> é objeto <strong>por referência</strong>:
+</p>
+<div class="card warn">
+Se você faz <code>post.Conteudo[0].Html = "novo"</code>, a referência da lista continua
+a mesma. O EF compara referência com referência, conclui "nada mudou" e
+<strong>não salva sua alteração</strong> — sem erro nenhum.
+</div>
+<p>
+O <code>ValueComparer</code> ensina o EF a comparar por <strong>valor</strong> (serializa
+os dois e compara o JSON), calcular hash, e fazer o snapshot com <strong>cópia real</strong>
+(deep copy via re-serialização). É o que faz mutação dentro da lista ser detectada.
+</p>
+
+<h2>3. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>Bloco</code> virou coluna <code>jsonb</code> em vez de tabela própria?</p>
+<button>Porque jsonb é sempre mais rápido que qualquer tabela relacional</button>
+<button>Porque o bloco nunca é consultado sozinho — carrega inteiro junto com o post</button>
+<button>Porque o Postgres não permite tabelas com muitas colunas</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> O que a lambda de <em>ida</em> do <code>HasConversion</code> faz, e quando roda?</p>
+<button>Serializa a <code>List&lt;Bloco&gt;</code> em string JSON, na hora de SALVAR</button>
+<button>Desserializa a string em <code>List&lt;Bloco&gt;</code>, na hora de LER</button>
+<button>Compara o valor atual com o snapshot pra detectar mudança</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>3.</strong> Sem o <code>ValueComparer</code>, que bug aparece?</p>
+<button>O EF lança uma exceção ao tentar salvar a lista</button>
+<button>A coluna é criada como <code>text</code> em vez de <code>jsonb</code></button>
+<button>Mutação dentro da lista não é detectada e não é salva — sem erro nenhum</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/modeling/value-conversions">EF Core — Value Conversions (Microsoft Learn)</a>
+· ver também <a href="https://learn.microsoft.com/en-us/ef/core/modeling/value-comparers">Value Comparers</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0001-ef-core-mapping.html">Aula 01 — Mapeamento EF Core</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>
