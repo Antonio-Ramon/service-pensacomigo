@@ -64,3 +64,7 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Torna Program referenciável pelos testes (WebApplicationFactory<Program>).
+// Top-level statements geram um Program internal; este partial o expõe.
+public partial class Program;
