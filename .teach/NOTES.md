@@ -38,6 +38,12 @@
   `AddExceptionHandler` + `app.UseExceptionHandler()`. Build verde. **429 ficou fora** (sem
   rate limiter ainda). Sem controller p/ exercitar de ponta a ponta — vem na Fatia 8 (harness).
 
+- [x] Fatia 9 — Caso de uso vertical CQRS (aula 0009). Primeiro Command/Handler/Controller reais:
+  `LoginGoogleCommand`, handler com a regra, `AuthController` magro (Send), primeiro validator
+  (achado por AddValidatorsFromAssembly). Google/JWT como seams (interfaces) — impl na Fatia 10.
+  `ObterPorEmailAsync` no repo. Build verde. **Endpoint não roda ponta a ponta ainda** (faltam impls+DI).
+  Abriu o Ticket 02.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

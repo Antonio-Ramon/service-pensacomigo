@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 09 — A fatia vertical CQRS</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Do HTTP ao banco: a fatia vertical</h1>
+<p class="sub">Aula 09 · Fatia 9 · Ticket 02 (Auth) · Command → Controller → Handler → Response</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> ver o pipeline da Fatia 5 <em>ganhar vida</em>. Até
+agora os behaviors eram um trilho sem trem. Hoje passa o primeiro trem de verdade — o
+login — e você entende como um caso de uso vira <code>Command</code> + <code>Handler</code> +
+<code>Controller</code>, cada peça com <strong>uma</strong> responsabilidade.
+</div>
+
+<h2>1. O que é uma "fatia vertical"</h2>
+<p>
+Um caso de uso corta as 5 camadas de cima a baixo: entra HTTP no <strong>Web</strong>, a regra
+roda na <strong>Application</strong>, os dados vêm da <strong>Persistence</strong>. Login é a
+primeira fatia inteira. O caminho é sempre este:
+</p>
+<pre><code>POST /api/v1/auth/login
+   → AuthController        <span class="cmt">(Web) só recebe e delega</span>
+   → mediator.Send(cmd)    <span class="cmt">(MediatR) entra na cebola de behaviors</span>
+   → Logging → Validation → UnitOfWork
+   → LoginGoogleCommandHandler   <span class="cmt">(Application) A REGRA</span>
+   → LoginResponse         <span class="cmt">volta pela cebola até o HTTP 200</span></code></pre>
+
+<h2>2. As três peças novas</h2>
+<p><strong>Command</strong> — a mensagem. Um <code>record</code>: só dados de entrada + o tipo da resposta.</p>
+<pre><code>public record LoginGoogleCommand(string IdToken) : ICommand&lt;LoginResponse&gt;;</code></pre>
+<p>
+É <code>ICommand</code> (não <code>IQuery</code>) porque o 1º login <em>grava</em> google_id e
+foto — logo precisa passar pelo <code>UnitOfWorkBehavior</code> e commitar. Escreveu? Command.
+
+<p><strong>Handler</strong> — onde a regra mora. Um handler por command. Recebe colaboradores por DI:</p>
+<pre><code>public class LoginGoogleCommandHandler(
+    IGoogleTokenValidator google,      <span class="cmt">valida o token</span>
+    IUsuarioRepository usuarios,        <span class="cmt">busca no banco</span>
+    IJwtTokenGenerator jwt)             <span class="cmt">emite o JWT próprio</span>
+    : IRequestHandler&lt;LoginGoogleCommand, LoginResponse&gt;
+{
+    public async Task&lt;LoginResponse&gt; Handle(LoginGoogleCommand cmd, CancellationToken ct)
+    {
+        var conta = await google.ValidarAsync(cmd.IdToken, ct);
+        var usuario = await usuarios.ObterPorEmailAsync(conta.Email, ct)
+            ?? throw new NaoEncontradoException("Usuário", conta.Email);  <span class="cmt">fora do seed → 404</span>
+        if (usuario.GoogleId is null) { usuario.GoogleId = conta.GoogleId; /* + foto */ }
+        return new LoginResponse(jwt.Gerar(usuario), usuario.Nome, usuario.ImagemUrl);
+    }
+}</code></pre>
+
+<p><strong>Controller</strong> — magro de propósito. Nenhuma regra, nenhum <code>if</code>:</p>
+<pre><code>[HttpPost("login")]
+public async Task&lt;ActionResult&lt;LoginResponse&gt;&gt; Login(LoginGoogleCommand command, CancellationToken ct)
+    =&gt; Ok(await mediator.Send(command, ct));</code></pre>
+<p>
+O ASP.NET desserializa o JSON do corpo direto no <code>LoginGoogleCommand</code>. O controller
+só empurra pro MediatR. Toda a lógica ficou testável sem HTTP nenhum.
+</p>
+
+<h2>3. O primeiro validator de verdade</h2>
+<p>
+A Fatia 5 montou o <code>ValidationBehavior</code>, mas não havia o que validar. Agora há:
+</p>
+<pre><code>public class LoginGoogleCommandValidator : AbstractValidator&lt;LoginGoogleCommand&gt;
+{
+    public LoginGoogleCommandValidator() =&gt;
+        RuleFor(c =&gt; c.IdToken).NotEmpty().WithMessage("O token do Google é obrigatório.");
+}</code></pre>
+<p>
+Você <strong>não</strong> registra nem chama isso em lugar nenhum. O
+<code>AddValidatorsFromAssembly</code> (Fatia 5) acha por reflexão, e o behavior o roda
+<em>antes</em> do handler. Token vazio → <code>ValidationException</code> → 422, sem tocar no banco.
+Veja <a href="0005-pipeline-mediatr.html">Aula 05</a>.
+</p>
+
+<h2>4. Por que Google e JWT são <em>interfaces</em></h2>
+<p>
+O handler depende de <code>IGoogleTokenValidator</code> e <code>IJwtTokenGenerator</code> — só
+interfaces, sem implementação ainda. Isso é um <strong>seam</strong> (costura), e é deliberado:
+</p>
+<ul>
+<li><strong>Regra da Clean Architecture:</strong> a Application não pode conhecer a lib do Google.
+A interface fica na Application; a implementação vai pra fora (Fatia 10).</li>
+<li><strong>Testabilidade:</strong> no teste de integração você troca o Google por um <em>fake</em>
+que devolve um email fixo — impossível bater no Google real num teste.</li>
+</ul>
+<div class="card warn">
+Por isso o endpoint <strong>ainda não roda de ponta a ponta</strong>: falta registrar as duas
+implementações na DI. Isso é a <strong>Fatia 10</strong> (validar token Google de verdade + emitir
+o JWT com a chave simétrica que o <code>Program.cs</code> já valida desde a Fatia 7). Build verde,
+fluxo montado, regra testável — o trilho está pronto pro trem completo.
+</div>
+
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Onde vive a regra de negócio do login?</p>
+<button>No controller; ele valida o token, busca o usuário e emite o JWT</button>
+<button>No handler; o controller só recebe, delega com Send e devolve</button>
+<button>No validator; é ele que decide se o login inteiro prossegue</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>LoginGoogleCommand</code> é um Command e não um Query?</p>
+<button>Porque todo endpoint que usa o verbo POST é modelado como Command</button>
+<button>Porque uma leitura nunca pode atravessar o pipeline de behaviors</button>
+<button>Porque grava google_id e foto no primeiro login, então commita</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que Google e JWT entram no handler como interfaces?</p>
+<button>São seams: troca por fake no teste e isola a lib externa</button>
+<button>Porque o MediatR exige que o handler receba apenas interfaces</button>
+<button>Porque interface deixa o commit do UnitOfWork mais barato</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://github.com/jbogard/MediatR/wiki">MediatR Wiki (Jimmy Bogard)</a>
+· <a href="https://docs.fluentvalidation.net/en/latest/">FluentValidation docs</a>
+· <a href="https://learn.microsoft.com/en-us/aspnet/core/web-api/">Controllers de Web API (Microsoft)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0008-harness-integracao.html">Aula 08 — Harness de integração</a>.
+Próxima: Fatia 10 — validar o token Google + emitir o JWT (as implementações dos seams).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>
