@@ -25,15 +25,21 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 // Valida o JWT PRÓPRIO (emitido no login da Fatia 02), chave simétrica via user-secrets.
 var jwt = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters
+    .AddJwtBearer(options =>
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwt["Issuer"],
-        ValidAudience = jwt["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"] ?? "")),
+        // Sem isso o handler renomeia `sub`→`nameidentifier`, `email`→`.../emailaddress` etc.
+        // Desligado: as claims chegam no User com o MESMO nome que o JwtTokenGenerator escreveu.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwt["Issuer"],
+            ValidAudience = jwt["Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"] ?? "")),
+        };
     });
 builder.Services.AddAuthorization();
 
