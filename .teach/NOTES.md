@@ -44,6 +44,13 @@
   `ObterPorEmailAsync` no repo. Build verde. **Endpoint não roda ponta a ponta ainda** (faltam impls+DI).
   Abriu o Ticket 02.
 
+- [x] Fatia 10 — Seams Google + JWT (aula 0010). `GoogleTokenValidator` (Google.Apis.Auth 1.75.0,
+  valida assinatura + `aud==Google:ClientId`) e `JwtTokenGenerator` (chave simétrica `Jwt:Key`,
+  claims sub/email/is_admin, 8h) em `Web/Auth/`. 2 `AddScoped` no Program ligam os seams. `Google:ClientId`
+  no appsettings. Build verde (8 proj, 0 warn). Impls no HOST (sem projeto Infrastructure — YAGNI).
+  Token Google inválido → 422 (reusa RegraDeNegocio; sem tipo p/ 401 ainda, `ponytail:` no validator).
+  **Pendências infra**: ClientId/Jwt:Key reais via secrets; teste integração do login precisa de Docker.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

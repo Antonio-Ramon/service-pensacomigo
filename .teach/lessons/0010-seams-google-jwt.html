@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 10 — Preenchendo os seams: Google + JWT</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>O trem completo: implementando os seams</h1>
+<p class="sub">Aula 10 · Fatia 10 · Ticket 02 (Auth) · das interfaces às implementações reais</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> o login agora roda <em>de ponta a ponta</em>. Na
+<a href="0009-caso-de-uso-vertical-cqrs.html">Aula 09</a> o handler dependia de duas interfaces
+vazias. Hoje você escreve as duas classes que faltavam, registra na DI, e o trilho ganha o trem.
+</div>
+
+<h2>1. Onde a implementação de um seam vive?</h2>
+<p>
+A interface (<code>IGoogleTokenValidator</code>) mora na <strong>Application</strong>. A implementação
+<strong>não pode</strong> morar lá — ela usa <code>Google.Apis.Auth</code>, e a regra da Clean
+Architecture proíbe a Application de conhecer libs externas. Então a impl vai pra <strong>fora</strong>,
+no <strong>host Web</strong> (a "composition root"), pasta <code>Web/Auth/</code>.
+</p>
+<pre><code>Application/Auth/IGoogleTokenValidator.cs   <span class="cmt">o contrato (a Application enxerga)</span>
+Web/Auth/GoogleTokenValidator.cs            <span class="cmt">a impl (só o host enxerga)</span></code></pre>
+<p>
+A seta de dependência aponta de fora (Web) pra dentro (Application) — nunca o contrário. Isso é
+<strong>inversão de dependência</strong>: o handler manda no <em>contrato</em>, o host escolhe o
+<em>concreto</em>. <span class="cmt">Não criamos um projeto Infrastructure separado — YAGNI: com um
+host só, o Web já é o lugar natural.</span>
+</p>
+
+<h2>2. Validar o token do Google</h2>
+<pre><code>public class GoogleTokenValidator(IConfiguration config) : IGoogleTokenValidator
+{
+    public async Task&lt;GoogleUserInfo&gt; ValidarAsync(string idToken, CancellationToken ct = default)
+    {
+        var settings = new GoogleJsonWebSignature.ValidationSettings
+        {
+            Audience = [config["Google:ClientId"]!],   <span class="cmt">o aud tem que ser NOSSO app</span>
+        };
+        try {
+            var p = await GoogleJsonWebSignature.ValidateAsync(idToken, settings);
+            return new GoogleUserInfo(p.Email, p.Subject, p.Picture);
+        }
+        catch (InvalidJwtException) {
+            throw new RegraDeNegocioException("Token do Google inválido ou expirado.");  <span class="cmt">→ 422</span>
+        }
+    }
+}</code></pre>
+<p>
+A lib baixa as chaves públicas do Google e confere a <strong>assinatura</strong> — você não confia
+no conteúdo, confia na criptografia. Se o token for forjado, expirado, ou o <code>aud</code> não bater,
+ela lança <code>InvalidJwtException</code>, que traduzimos pra nossa exceção tipada da
+<a href="0006-exception-handling.html">Aula 06</a>.
+</p>
+
+<h2>3. Emitir o JWT PRÓPRIO</h2>
+<p>
+Depois do Google validar <em>quem</em> a pessoa é, nós emitimos <strong>nosso</strong> token — o que o
+frontend manda de volta em toda requisição. Assinamos com a mesma chave que o
+<code>Program.cs</code> valida desde a <a href="0007-swagger-jwt-versionamento.html">Aula 07</a>:
+</p>
+<pre><code>var chave = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!));
+var cred  = new SigningCredentials(chave, SecurityAlgorithms.HmacSha256);
+
+Claim[] claims = [
+    new(JwtRegisteredClaimNames.Sub, usuario.Id.ToString()),   <span class="cmt">quem é</span>
+    new(JwtRegisteredClaimNames.Email, usuario.Email),
+    new("is_admin", usuario.IsAdmin.ToString()),               <span class="cmt">o que pode</span>
+];
+var token = new JwtSecurityToken(jwt["Issuer"], jwt["Audience"], claims,
+                                 expires: DateTime.UtcNow.AddHours(8), signingCredentials: cred);
+return new JwtSecurityTokenHandler().WriteToken(token);</code></pre>
+<div class="card">
+<strong>Dois tokens, não confunda:</strong> o <em>idToken do Google</em> prova a identidade UMA vez, no
+login. O <em>JWT próprio</em> é a sua sessão dali pra frente. O Google não sabe nada do seu app depois
+do login — daí a necessidade de emitir o seu.
+</div>
+<p>
+<strong>Claims</strong> são afirmações assinadas sobre o portador. Como estão dentro da assinatura,
+ninguém as adultera sem invalidar o token. Na <strong>Fatia 11</strong> você vai <em>ler</em> essas
+claims via <code>User</code> num endpoint <code>[Authorize]</code>.
+</p>
+
+<h2>4. Ligar tudo na DI</h2>
+<pre><code>builder.Services.AddScoped&lt;IGoogleTokenValidator, GoogleTokenValidator&gt;();
+builder.Services.AddScoped&lt;IJwtTokenGenerator, JwtTokenGenerator&gt;();</code></pre>
+<p>
+Estas duas linhas são o que faltava. Agora quando o MediatR constrói o
+<code>LoginGoogleCommandHandler</code>, o container resolve as interfaces do construtor pras classes
+concretas. <strong>Sem elas o app subia mas explodia</strong> ao tentar montar o handler — a DI não
+saberia o que injetar.
+</p>
+
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>GoogleTokenValidator</code> fica no projeto Web e não na Application?</p>
+<button>Porque só o host tem acesso ao container de injeção de dependência</button>
+<button>Porque usa uma lib externa que a Application não pode conhecer</button>
+<button>Porque handlers do MediatR só resolvem classes do projeto Web</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Qual a diferença entre o idToken do Google e o JWT próprio?</p>
+<button>Nenhuma; o JWT próprio é o mesmo idToken só que reassinado</button>
+<button>O idToken guarda a sessão; o JWT próprio prova a identidade</button>
+<button>O idToken prova identidade no login; o JWT próprio é a sessão depois</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> O que acontece se você esquecer as duas linhas de <code>AddScoped</code>?</p>
+<button>A DI não sabe injetar os seams e falha ao montar o handler</button>
+<button>O login roda, mas devolve um JWT sem nenhuma claim dentro</button>
+<button>O validator do FluentValidation deixa de rodar antes do handler</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authentication/configure-jwt-bearer-authentication">Configurar JWT Bearer (Microsoft)</a>
+· <a href="https://developers.google.com/identity/sign-in/web/backend-auth">Verify the Google ID Token (Google)</a>
+· <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection">DI no .NET (Microsoft)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0009-caso-de-uso-vertical-cqrs.html">Aula 09 — A fatia vertical CQRS</a>.
+Próxima: Fatia 11 — endpoint <code>[Authorize]</code> lendo as claims do <code>User</code>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>
