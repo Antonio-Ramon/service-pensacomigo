@@ -30,4 +30,4 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Roadmap do Ticket 02 (Auth Google + JWT)
 9. **Fatia vertical CQRS**: 1º Command/Handler/Controller + validator (login) ← *estamos aqui*
 10. Implementar os seams: validar token Google (Google.Apis.Auth) + emitir JWT + DI → login roda
-11. `GET` perfil autenticado: `[Authorize]` + ler claims do `ClaimsPrincipal`
+11. ✅ `GET` perfil autenticado: `[Authorize]` + ler claims do `ClaimsPrincipal` + 1º Query CQRS

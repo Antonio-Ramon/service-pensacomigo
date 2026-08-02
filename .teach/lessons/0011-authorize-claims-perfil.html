@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 11 — Endpoint protegido: [Authorize] + ler claims</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Quem está batendo na porta? Lendo o token no endpoint</h1>
+<p class="sub">Aula 11 · Fatia 11 · Ticket 02 (Auth) · [Authorize] + ClaimsPrincipal + 1º Query CQRS</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> o <code>GET /api/v1/usuarios/me</code> devolve o perfil do
+usuário logado. Sem token → <strong>401 automático</strong>. Com token → a API sabe QUEM você é
+lendo as <em>claims</em> que o login assinou na <a href="0010-seams-google-jwt.html">Aula 10</a>.
+E de brinde: seu <strong>primeiro Query</strong> — o lado leitura do CQRS.
+</div>
+
+<h2>1. <code>[Authorize]</code>: o porteiro</h2>
+<p>
+Um atributo em cima da action. O middleware <code>UseAuthentication</code> (Fatia 7) já tentou
+validar o <code>Bearer</code> token em toda requisição; o <code>[Authorize]</code> só decide:
+<em>tem token válido? passa. Não tem? <strong>401</strong> antes do seu código rodar.</em>
+Você não escreve nenhum <code>if</code> — o pipeline faz.
+</p>
+<pre><code>[Authorize]
+[HttpGet("me")]
+public async Task&lt;ActionResult&lt;PerfilResponse&gt;&gt; EuMesmo(CancellationToken ct)</code></pre>
+
+<h2>2. <code>User</code>: quem o token diz que você é</h2>
+<p>
+Dentro de qualquer controller existe <code>User</code> — um <code>ClaimsPrincipal</code> que o
+middleware montou a partir das claims do JWT. Claims são as afirmações assinadas que você
+<strong>escreveu</strong> no <code>JwtTokenGenerator</code>: <code>sub</code> (o id),
+<code>email</code>, <code>is_admin</code>. Ler é buscar pela chave:
+</p>
+<pre><code>var id = Guid.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);</code></pre>
+<p>
+<span class="cmt">O <code>!</code> afirma "não é null" — o [Authorize] já garantiu que há um token,
+e todo token nosso carrega o <code>sub</code>.</span>
+</p>
+
+<div class="card">
+<strong>⚠️ O pega-ratão das claims.</strong> Por padrão o handler JWT <em>renomeia</em> claims na
+entrada: <code>sub</code> vira <code>...nameidentifier</code>, <code>email</code> vira uma URL
+gigante. Herança dos velhos tempos do SAML. Então <code>FindFirstValue("sub")</code> voltaria
+<code>null</code>! Desligamos isso no <code>Program.cs</code> com <strong>uma linha</strong> pra os
+nomes chegarem intactos:
+<pre><code>options.MapInboundClaims = false; <span class="cmt">// sub continua sub</span></code></pre>
+</div>
+
+<h2>3. Primeiro Query: o lado leitura do CQRS</h2>
+<p>
+Na <a href="0009-caso-de-uso-vertical-cqrs.html">Aula 09</a> você fez um <strong>Command</strong>
+(muda estado, commita). Agora o oposto: um <strong>Query</strong> — só lê. Mesma máquina do
+MediatR, marcador diferente:
+</p>
+<pre><code>public record ObterPerfilQuery(Guid UsuarioId) : IQuery&lt;PerfilResponse&gt;;</code></pre>
+<p>
+Por que separar Command de Query? Intenção explícita: o <code>UnitOfWorkBehavior</code> (Fatia 5)
+só dá <code>SaveChanges</code> pra <code>IBaseCommand</code> — um Query <strong>nunca</strong>
+grava sem querer. O tipo comunica "isto é leitura pura", e o pipeline respeita.
+</p>
+
+<h2>4. O trem inteiro</h2>
+<pre><code>GET /usuarios/me  →  [Authorize] valida o JWT           <span class="cmt">sem token = 401</span>
+                  →  controller lê `sub` do User         <span class="cmt">o id do dono do token</span>
+                  →  Send(ObterPerfilQuery(id))          <span class="cmt">MediatR acha o handler</span>
+                  →  handler busca no repo (dados frescos)<span class="cmt">nome/foto não cabem no token</span>
+                  →  PerfilResponse                       <span class="cmt">200 OK</span></code></pre>
+<p>
+Repare: o token prova <em>quem</em> (barato, offline), mas nome e foto vêm do banco (<em>frescos</em>).
+Se a pessoa trocou a foto, o <code>/me</code> reflete — o token não precisa ser reemitido.
+</p>
+
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> O que faz o <code>[Authorize]</code> quando chega uma requisição sem token?</p>
+<button>Deixa passar e põe o User como null pro seu código tratar depois</button>
+<button>Roda o handler mas o MediatR recusa devolvendo um 403 padrão</button>
+<button>Corta com 401 antes do seu código rodar, sem você escrever if</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> Por que ligamos <code>MapInboundClaims = false</code> no Program?</p>
+<button>Pra claim chegar no User com o mesmo nome que o gerador escreveu</button>
+<button>Pra validar a assinatura do token contra a chave simétrica salva</button>
+<button>Pra o handler do MediatR conseguir resolver o Query pela interface</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que <code>ObterPerfilQuery</code> é Query e não Command?</p>
+<button>Porque devolve um record em vez de alterar direto a entidade viva</button>
+<button>Porque só lê dados e não deve disparar SaveChanges no pipeline</button>
+<button>Porque roda sem passar pelos behaviors de Logging e Validation</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/simple">Autorização simples com [Authorize] (Microsoft)</a>
+· <a href="https://learn.microsoft.com/en-us/aspnet/core/security/authentication/claims">Claims-based identity (Microsoft)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0010-seams-google-jwt.html">Aula 10 — Preenchendo os seams</a>.
+Próxima: primeiro caso de uso de conteúdo (criar Post) — CQRS Command com a entidade de verdade.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

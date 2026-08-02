@@ -44,6 +44,12 @@
   `ObterPorEmailAsync` no repo. Build verde. **Endpoint não roda ponta a ponta ainda** (faltam impls+DI).
   Abriu o Ticket 02.
 
+- [x] Fatia 11 — Endpoint protegido + claims (aula 0011). `[Authorize] GET usuarios/me` (401 auto),
+  lê `sub` do `User` (`ClaimsPrincipal`), `MapInboundClaims=false` no Program p/ nome da claim intacto.
+  Primeiro **Query** CQRS (`ObterPerfilQuery : IQuery<>`, sem commit). Build verde (8 proj, 0 erro).
+  Warning MSB3277 (conflito EF 10.0.4/10.0.9 em IntegrationTests) pré-existente. Não roda ponta a
+  ponta aqui (precisa JWT real + Docker). **Ticket 02 fechado no código.**
+
 - [x] Fatia 10 — Seams Google + JWT (aula 0010). `GoogleTokenValidator` (Google.Apis.Auth 1.75.0,
   valida assinatura + `aud==Google:ClientId`) e `JwtTokenGenerator` (chave simétrica `Jwt:Key`,
   claims sub/email/is_admin, 8h) em `Web/Auth/`. 2 `AddScoped` no Program ligam os seams. `Google:ClientId`
