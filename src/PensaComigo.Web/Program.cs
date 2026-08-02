@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using PensaComigo.Application;
+using PensaComigo.Application.Auth;
 using PensaComigo.Persistence;
+using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +13,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddApplication();
 builder.Services.AddPersistence(builder.Configuration);
+
+// Impls dos seams de auth (Fatia 10). Ficam no host: dependem de config e de libs externas
+// que a Application não pode conhecer. O teste de integração troca IGoogleTokenValidator por fake.
+builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
+builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
