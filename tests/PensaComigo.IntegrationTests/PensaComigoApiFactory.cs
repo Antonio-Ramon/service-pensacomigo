@@ -23,6 +23,9 @@ public sealed class PensaComigoApiFactory : WebApplicationFactory<Program>, IAsy
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("ConnectionStrings:Default", _postgres.GetConnectionString());
+        // Chave de teste pra o JwtTokenGenerator emitir tokens que o AddJwtBearer valida.
+        // (>= 32 bytes p/ HS256). Em produção vem de user-secrets.
+        builder.UseSetting("Jwt:Key", "chave-de-teste-com-mais-de-32-bytes-para-hs256!!");
     }
 
     // Explícito: o IAsyncLifetime do xunit v2 usa Task; a base WebApplicationFactory
