@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 15 — Função pura e o primeiro teste unitário</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Função pura e o primeiro teste unitário</h1>
+<p class="sub">Aula 15 · Fatia 15 · Ticket 05 — Post (criar/editar/deletar), primeira parte</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> <code>dotnet test</code> rodou <strong>18 testes em 358&nbsp;ms</strong>
+— nesta máquina, sem Docker, sem Postgres, sem subir a API. Foi o primeiro teste que você
+conseguiu <em>executar</em> desde a Fatia 8. E a lógica testada (slug + tempo de leitura) é
+exatamente o que o Ticket 05 precisa antes de existir o <code>CriarPostCommand</code>.
+</div>
+
+<h2>1. Por que esta fatia veio antes de "criar post"</h2>
+<p>
+O ticket 05 tem 7 itens. Dois deles vêm marcados <code>[unit]</code>:
+</p>
+<pre><code>- [ ] GeradorSlug: normaliza, congela na edição, colisão com sufixo -N   <span class="cmt">[unit]</span>
+- [ ] TempoLeitura calculado no handler ao salvar                        <span class="cmt">[unit]</span></code></pre>
+<p>
+Não é decoração do ticket: são as duas partes do caso de uso que <strong>não dependem de nada</strong>
+— nem de banco, nem de HTTP, nem do usuário logado. Entra texto, sai texto. Isso tem nome
+e tem um tipo de teste próprio.
+</p>
+
+<h2>2. Função pura</h2>
+<p>
+Uma função é <strong>pura</strong> quando (a) o resultado depende só dos argumentos e (b) ela não
+mexe em nada fora dela. <code>GeradorSlug.Gerar("Saúde Mental")</code> devolve
+<code>"saude-mental"</code> hoje, amanhã, na sua máquina e no CI. Compare com o que você
+escreveu até agora:
+</p>
+<table>
+<tr><th>Código</th><th>Puro?</th><th>Para testar preciso de…</th></tr>
+<tr><td><code>CriarTagCommandHandler</code></td><td>não</td><td>um <code>ITagRepository</code> (banco ou fake)</td></tr>
+<tr><td><code>SupabaseStorage</code></td><td>não</td><td>rede, chave, servidor de pé</td></tr>
+<tr><td><code>GeradorSlug.Gerar</code></td><td><strong>sim</strong></td><td>nada</td></tr>
+</table>
+<p>
+Daí a jogada desta fatia: a regra que <em>pode</em> ser pura sai do handler e vira uma classe
+<code>static</code> própria. O handler continua impuro (ele fala com o repositório), mas fica
+com <em>só</em> a parte impura. Isso é o
+<a href="https://blog.ploeh.dk/2020/03/02/impureim-sandwich/">sanduíche impuro–puro–impuro</a>
+de Mark Seemann: leia (impuro) → decida (puro) → grave (impuro).
+</p>
+
+<h2>3. A pirâmide de testes, na prática deste repo</h2>
+<pre><code>       /\        IntegrationTests   <span class="cmt">WebApplicationFactory + Testcontainers</span>
+      /  \       ~segundos, precisa de Docker, testa a fiação inteira
+     /----\
+    /      \     UnitTests          <span class="cmt">só as classes, sem processo nem I/O</span>
+   /________\    ~milissegundos, roda em qualquer lugar, testa a REGRA</code></pre>
+<p>
+Você só tinha o topo. O topo é caro: 1 teste de integração de slug precisaria criar 3 posts
+contra Postgres real pra verificar <code>-2</code> e <code>-3</code>. Os 6 testes de
+<code>GeradorSlug</code> cobrem mais casos e custaram 0&nbsp;ms de infra. A regra prática é a
+<a href="https://martinfowler.com/articles/practical-test-pyramid.html">pirâmide do Fowler</a>:
+<strong>muita regra embaixo, pouca fiação em cima</strong>. O teste de integração do Ticket 05
+continua existindo — mas ele vai provar <em>o jsonb e o índice único</em>, não a matemática do slug.
+</p>
+
+<h2>4. xUnit: <code>[Fact]</code> vs <code>[Theory]</code></h2>
+<p>
+São os dois atributos que você vai usar 95% do tempo. <code>[Fact]</code> = um caso.
+<code>[Theory]</code> + <code>[InlineData]</code> = o mesmo teste com N entradas — cada linha
+vira um <strong>teste independente</strong> no relatório (por isso 18 testes saíram de 11 métodos).
+</p>
+<pre><code>[Theory]
+[InlineData("Saúde Mental", "saude-mental")]
+[InlineData("  Fé, Esperança e Amor!  ", "fe-esperanca-e-amor")]
+[InlineData("---Coração---", "coracao")]
+public void Gerar_normaliza_o_texto(string entrada, string esperado) =&gt;
+    Assert.Equal(esperado, GeradorSlug.Gerar(entrada));</code></pre>
+<div class="card tip">
+<strong>Nada de <code>[SetUp]</code>/<code>[TearDown]</code>:</strong> no xUnit cada teste roda numa
+<strong>instância nova da classe</strong>. O construtor é o setup; <code>IDisposable</code> é o
+teardown. Foi por isso que a Fatia 8 precisou de <code>IAsyncLifetime</code> — é o equivalente
+assíncrono disso.
+</div>
+<p>
+Repare também no que os <code>InlineData</code> escolhem testar em
+<code>CalculadoraTempoLeitura</code>: <code>200</code> e <code>201</code> palavras. Bug de
+arredondamento não mora no meio, mora na <strong>borda</strong>. Testar 50 e 400 não provaria nada
+que 200/201 não provem melhor.
+</p>
+
+<h2>5. Onde o código foi parar (e por que não no <code>Shared</code>)</h2>
+<p>
+O ticket diz "<code>GeradorSlug</code> no Shared". Só que:
+</p>
+<pre><code>Shared      ──referencia──&gt;  Application
+Application ──referencia──&gt;  Domain          <span class="cmt">e mais nada</span></code></pre>
+<p>
+A seta aponta <strong>Shared → Application</strong>. Se o gerador morasse no Shared, o
+<code>CriarPostCommandHandler</code> (que vive na Application) <em>não conseguiria enxergá-lo</em> —
+seria referência circular, o compilador recusa. Então foi pra
+<code>Application/Common/</code>. Segundo desvio consciente de ticket que a gente registra (o
+primeiro foi o path da imagem, Fatia 14): <strong>quem decide onde o código mora é a direção da
+dependência, não o texto do ticket</strong>.
+</p>
+<pre><code>Application/Common/GeradorSlug.cs              <span class="cmt">Gerar + ResolverColisao — puro</span>
+Application/Common/CalculadoraTempoLeitura.cs  <span class="cmt">Calcular(blocos) — puro</span>
+tests/PensaComigo.UnitTests/Common/…Tests.cs   <span class="cmt">18 testes, 358 ms</span></code></pre>
+<p>
+E o <code>CriarTagCommandHandler</code> perdeu as 10 linhas de normalização que tinha copiadas
+dentro dele (Fatia 12) — agora chama <code>GeradorSlug.Gerar</code>. Uma regra, um lugar, um teste.
+</p>
+
+<h2>6. A colisão de slug: I/O fora, decisão dentro</h2>
+<p>
+"Resolver colisão com sufixo <code>-N</code>" parece exigir banco: <em>enquanto existir, tenta o
+próximo</em>. Escrito assim, seria um <code>while</code> com <code>await</code> dentro — impuro,
+N idas ao banco, e intestável sem Postgres. A assinatura escolhida vira o problema do avesso:
+</p>
+<pre><code>public static string ResolverColisao(string slugBase, IEnumerable&lt;string&gt; ocupados)</code></pre>
+<p>
+O handler faz <strong>uma</strong> consulta ("me dá os slugs que começam com <code>salmo-23</code>")
+e passa a lista. A função pura escolhe o primeiro livre. Um round-trip, zero I/O na regra,
+e casos difíceis viram uma linha de teste:
+</p>
+<pre><code>ResolverColisao("salmo-23", ["salmo-23", "salmo-23-2", "salmo-23-3"])  → "salmo-23-4"
+ResolverColisao("salmo-23", ["salmo-231"])                            → "salmo-23"</code></pre>
+<p>
+O segundo caso é o tipo de bug que só aparece em produção: <code>salmo-231</code> <em>começa com</em>
+<code>salmo-23</code>, mas não é colisão. O teste trava esse comportamento.
+</p>
+<div class="card warn">
+<strong>Isto não substitui o índice único.</strong> Dois posts criados no mesmo milissegundo leem a
+mesma lista e escolhem o mesmo <code>-2</code>. A checagem é pra dar erro <em>amigável</em>; quem
+garante unicidade é a constraint do Postgres. Mesma lógica do 422 da tag (Fatia 12).
+</div>
+
+<h2>7. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> O que torna <code>GeradorSlug.Gerar</code> uma função pura?</p>
+<button>Ser <code>static</code>, o que impede o .NET de guardar estado na instância</button>
+<button>Não ter <code>async</code>, então nenhuma thread observa resultado parcial</button>
+<button>Depender só do argumento e não tocar em nada fora dela mesma</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> Por que <code>ResolverColisao</code> recebe a lista em vez de consultar o banco?</p>
+<button>Pra manter a regra pura: uma consulta no handler, decisão testável sem I/O</button>
+<button>Pra evitar o índice único, que ficaria redundante com a busca por prefixo</button>
+<button>Pra deixar o EF Core rastrear os slugs e commitar tudo num SaveChanges só</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Qual a diferença entre <code>[Fact]</code> e <code>[Theory]</code> no xUnit?</p>
+<button>Fact roda isolado do resto; Theory compartilha uma instância entre os casos</button>
+<button>Fact é um caso só; Theory repete o teste com cada linha de InlineData</button>
+<button>Fact valida retorno de método; Theory valida exceção lançada pelo método</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que <code>GeradorSlug</code> não pôde ir para o projeto <code>Shared</code>?</p>
+<button>Porque Shared não pode conter classes estáticas, só contratos e DTOs cruzados</button>
+<button>Porque Shared não é referenciado pelo host Web e sumiria do build final</button>
+<button>Porque Shared referencia Application: a Application não consegue enxergar de volta</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>5.</strong> Por que o teste usa 200 e 201 palavras, e não 50 e 400?</p>
+<button>Porque bug de arredondamento mora na borda do limite, não no meio da faixa</button>
+<button>Porque InlineData exige valores próximos pra o xUnit agrupar os casos no relatório</button>
+<button>Porque abaixo de 200 palavras a calculadora ignora o bloco e devolve zero minuto</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-csharp-with-xunit">Unit
+testing C# with xUnit (Microsoft Learn)</a> — o tutorial oficial, leia a parte de
+<code>[Theory]</code>. Complementos:
+<a href="https://martinfowler.com/articles/practical-test-pyramid.html">The Practical Test Pyramid
+(Fowler)</a> ·
+<a href="https://blog.ploeh.dk/2020/03/02/impureim-sandwich/">Impureim sandwich (Seemann)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0014-httpclient-options-signed-url.html">Aula 14 — typed HttpClient + Options</a>.
+Próxima: Fatia 16 — <code>CriarPostCommand</code>: relação N:N com Tags e o
+<code>List&lt;Bloco&gt;</code> indo pro jsonb de verdade (aí essas duas funções entram no handler).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -83,6 +83,13 @@
   seam por fake via `ConfigureTestServices`. Build verde (8 proj, 0 erro). **Sem Docker aqui** → teste
   não rodou. Quiz agora usa `assets/quiz.js` (extraído; aulas antigas seguem com script inline).
 
+- [x] Fatia 15 — Função pura + 1º teste unitário (aula 0015). `GeradorSlug` (`Gerar` +
+  `ResolverColisao(base, ocupados)`) e `CalculadoraTempoLeitura` em `Application/Common` —
+  **não no `Shared`**: a seta é `Shared → Application`, então Shared seria invisível pro handler.
+  `CriarTagCommandHandler` deixou de duplicar a normalização. 11 métodos → **18 testes, 358 ms,
+  todos verdes** (primeiro teste que ROda nesta máquina — não precisa de Docker). Build verde
+  (8 proj, 0 erro). Fecha 2 dos 7 itens da issue 05.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
