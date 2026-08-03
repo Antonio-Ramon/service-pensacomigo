@@ -24,8 +24,11 @@
 - Caso de uso é `IQuery`, não `ICommand`: nada é gravado no Postgres.
 
 ## Follow-ups
-- [ ] `Supabase:Url` e `Supabase:ServiceRoleKey` reais via user-secrets + bucket `imagens`
-      criado no projeto Supabase (infra do usuário).
+- [x] `Supabase:Url` e `Supabase:ServiceRoleKey` reais via user-secrets + bucket `imagens`
+      criado no projeto Supabase (público p/ leitura, limite 5 MB, MIME jpeg/png/webp).
+      Conferido: `POST object/upload/sign/imagens/…` devolve `{ url, token }` (token vale 2 h)
+      e a API sobe com o `ValidateOnStart` passando. **Nome do bucket é case-sensitive** —
+      criado como `Imagens` dava 404 `The related resource does not exist`.
 - [ ] Teste de integração não rodou aqui — **Docker ausente na máquina** (mesma pendência das
       issues anteriores).
 - [ ] Falha do Supabase hoje vira 422 (`RegraDeNegocioException`). Quando houver a segunda
