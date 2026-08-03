@@ -9,3 +9,5 @@
 - [ ] `Shared/Storage.GerarUrlUploadAssinada(path)`
 - [ ] Endpoint fino (autenticado) devolve a signed URL do Supabase Storage
 - [ ] Teste: endpoint exige JWT e devolve URL assinada para um path
+
+> Gridify (Decisão #19 / arquitetura §7.1): **não se aplica** — sem endpoint de listagem aqui.

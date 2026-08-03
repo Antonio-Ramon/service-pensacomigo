@@ -10,3 +10,5 @@
 - [ ] Descurtir: remove Like + decrementa
 - [ ] Dedup por unique `(post_id, viewer_hash)` — curtida repetida não conta
 - [ ] Teste de integração: curtir duas vezes o mesmo `viewer_hash` mantém contador em 1; descurtir zera; atomicidade contra Postgres real
+
+> Gridify (Decisão #19 / arquitetura §7.1): **não se aplica** — só curtir/descurtir, sem endpoint de listagem.

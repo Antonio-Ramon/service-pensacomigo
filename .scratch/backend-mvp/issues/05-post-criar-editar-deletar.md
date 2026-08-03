@@ -13,3 +13,5 @@
 - [ ] Deletar post
 - [ ] Escrita/edição/delete exigem JWT
 - [ ] Teste de integração: cria post e valida jsonb + slug congelado + colisão de slug contra Postgres real
+
+> Gridify (Decisão #19 / arquitetura §7.1): **não se aplica** — este ticket é criar/editar/deletar; a listagem de posts (com Gridify) é a issue 06.

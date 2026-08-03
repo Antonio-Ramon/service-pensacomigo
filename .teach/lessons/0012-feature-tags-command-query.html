@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 12 — Primeira feature CRUD: Command + Query juntos (Tags)</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Uma feature inteira: criar e listar Tags</h1>
+<p class="sub">Aula 12 · Fatia 12 · Ticket 03 (Tags) · Command + Query · [Authorize] vs [AllowAnonymous] · campo calculado</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> a primeira feature <em>não-auth</em> completa. Um endpoint
+público <code>GET /api/v1/tags</code> (qualquer um lista) e um protegido
+<code>POST /api/v1/tags</code> (só autor logado cria) — no <strong>mesmo controller</strong>.
+Você junta tudo que já aprendeu: Command (<a href="0009-caso-de-uso-vertical-cqrs.html">Aula 09</a>),
+Query (<a href="0011-authorize-claims-perfil.html">Aula 11</a>), validator, repositório.
+</div>
+
+<h2>1. Uma feature = uma pasta, dois lados do CQRS</h2>
+<p>
+Até agora Command e Query moraram em features separadas (Login, Perfil). Tags é a primeira que
+tem os <strong>dois lados</strong>. A organização segue o caso de uso, não a camada técnica:
+</p>
+<pre><code>Application/Tags/
+├── TagResponse.cs           <span class="cmt">shape de saída, compartilhado</span>
+├── Criar/                   <span class="cmt">lado ESCRITA</span>
+│   ├── CriarTagCommand.cs        : ICommand&lt;TagResponse&gt;
+│   ├── CriarTagCommandValidator.cs
+│   └── CriarTagCommandHandler.cs
+└── Listar/                  <span class="cmt">lado LEITURA</span>
+    ├── ListarTagsQuery.cs        : GridifyQuery, IQuery&lt;Pagina&lt;TagResponse&gt;&gt;
+    └── ListarTagsQueryHandler.cs</code></pre>
+<p>
+Mesma máquina do MediatR pros dois; o marcador (<code>ICommand</code> vs <code>IQuery</code>)
+decide se o <code>UnitOfWorkBehavior</code> commita. Criar grava → commita. Listar só lê → não.
+</p>
+
+<h2>2. Um controller, duas posturas de segurança</h2>
+<p>
+O atributo de autorização mora <strong>por action</strong>. No mesmo <code>TagsController</code>:
+</p>
+<pre><code>[AllowAnonymous]           <span class="cmt">público: sem token, todo mundo lista</span>
+[HttpGet]
+public ... Listar([FromQuery] ListarTagsQuery query, ...) =&gt; Ok(await mediator.Send(query, ct));
+
+[Authorize]                <span class="cmt">protegido: sem token = 401 automático</span>
+[HttpPost]
+public ... Criar(CriarTagCommand command, ...) =&gt; Ok(await mediator.Send(command, ct));</code></pre>
+<p>
+"Autor cria tag (autenticado)" do ticket vira <strong>uma linha</strong>: <code>[Authorize]</code>.
+Repare que <code>CriarTagCommand</code> <em>não</em> tem campo <code>autorId</code>. A tag não guarda
+autor — a regra é só "estar logado". Se guardasse, o id viria da <strong>claim</strong>
+(<a href="0011-authorize-claims-perfil.html">Aula 11</a>), <strong>nunca do body</strong>: cliente
+não decide quem é o autor.
+</p>
+
+<h2>3. Slug: campo calculado vive no handler</h2>
+<p>
+Convenção do projeto (igual <code>TempoLeitura</code>): o que é <em>derivado</em> se calcula na
+Application, não na entidade. O cliente manda só <code>Nome</code>; o handler produz o
+<code>Slug</code> — a versão URL-friendly:
+</p>
+<pre><code>"Saúde Mental"  →  GerarSlug()  →  "saude-mental"</code></pre>
+<p>
+Tirar acento em C# tem um truque idiomático: <code>Normalize(FormD)</code> <strong>separa</strong>
+a letra do acento (<code>á</code> → <code>a</code> + <code>´</code>), e aí você joga fora as marcas
+(<code>NonSpacingMark</code>). Depois um regex troca o resto por hífen:
+</p>
+<pre><code>var d = nome.Trim().ToLowerInvariant().Normalize(NormalizationForm.FormD);
+// ...descarta os NonSpacingMark, sobra "saude mental"...
+return Regex.Replace(semAcento, "[^a-z0-9]+", "-").Trim('-');</code></pre>
+
+<h2>4. Regra de negócio: 422 amigável &gt; 500 do banco</h2>
+<p>
+O <code>slug</code> tem índice único no Postgres (<code>TagConfiguration</code>). Se dois nomes
+colidem, o banco <em>rejeitaria</em> — mas o erro cru vira um <strong>500</strong> feio. Melhor
+checar antes e devolver a exceção tipada da <a href="0006-exception-handling.html">Aula 06</a>:
+</p>
+<pre><code>if (await tags.ExistePorSlugAsync(slug, ct))
+    throw new RegraDeNegocioException($"Já existe uma tag equivalente a \"{cmd.Nome}\".");</code></pre>
+<p>
+O <code>GlobalExceptionHandler</code> traduz isso pra <strong>422</strong> com mensagem clara.
+O índice único continua lá como <em>rede de segurança</em> contra corrida — mas o caminho normal
+dá um erro que o frontend entende.
+</p>
+
+<h2>5. O teste de integração prova o contrato</h2>
+<p>
+O ticket pede exatamente três coisas — o teste as afirma em cima do Postgres real:
+</p>
+<pre><code>POST sem token            → 401                       <span class="cmt">criar exige JWT</span>
+POST com token do seed    → 200 + slug "saude-mental"  <span class="cmt">autor cria</span>
+GET  anônimo              → a página contém a tag       <span class="cmt">público</span></code></pre>
+<div class="card">
+<strong>Atualizado depois:</strong> a listagem foi conformada ao padrão <strong>Gridify</strong>
+(decisão project-wide, arquitetura §7.1) — <code>ListarTagsQuery</code> herda
+<code>GridifyQuery</code> e a resposta virou o envelope <code>{ items, totalItems }</code>
+em vez de lista crua. Ver <a href="0013-gridify-listagem-paginada.html">Aula 13</a>.
+</div>
+<p>
+Detalhe elegante: pra ter um JWT válido no teste, ele <strong>reusa o próprio
+<code>IJwtTokenGenerator</code> da API</strong> (resolvido da DI) e o usuário do seed. Nada de
+forjar token na mão — a mesma peça que assina em produção assina no teste.
+</p>
+
+<h2>6. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>CriarTagCommand</code> é <code>ICommand</code> e <code>ListarTagsQuery</code> é <code>IQuery</code>?</p>
+<button>Porque Command devolve um objeto e Query devolve uma lista de itens</button>
+<button>Porque criar grava e precisa commitar; listar só lê e não deve commitar</button>
+<button>Porque só o Command passa pelos behaviors de Logging e de Validation</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Como o endpoint de criar tag exige que o usuário esteja autenticado?</p>
+<button>Um if no handler compara o autorId do body com o id salvo na claim</button>
+<button>O validator do FluentValidation recusa quando falta o campo de autor</button>
+<button>Um atributo [Authorize] na action; sem token válido corta com 401</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que checar <code>ExistePorSlugAsync</code> se o slug já tem índice único no banco?</p>
+<button>Pra devolver um 422 claro em vez de deixar o banco estourar um 500</button>
+<button>Pra evitar a ida ao banco no caminho feliz quando o slug é novo</button>
+<button>Pra o UnitOfWorkBehavior saber que precisa commitar essa escrita</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/simple">[Authorize] / [AllowAnonymous] (Microsoft)</a>
+· <a href="https://learn.microsoft.com/en-us/dotnet/api/system.string.normalize">String.Normalize e formas Unicode (Microsoft)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0011-authorize-claims-perfil.html">Aula 11 — [Authorize] + claims</a>.
+Próxima: <a href="0013-gridify-listagem-paginada.html">Aula 13 — Gridify: listagem paginada e filtrável</a>.
+Depois: Ticket 04/05 — conteúdo de verdade (Post): jsonb <code>List&lt;Bloco&gt;</code> num Command real.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

@@ -22,6 +22,7 @@ O backend adota **Clean Architecture + CQRS + Vertical Slicing** sobre **.NET 10
 | **Mediação** | MediatR | Despacho de Commands/Queries |
 | **ORM** | Entity Framework Core (Npgsql) | Mapeamento para PostgreSQL |
 | **Validação** | FluentValidation | Via pipeline behavior do MediatR |
+| **Listagem/Paginação** | Gridify | Filtro/ordenação/paginação dinâmicos via querystring; padrão de todo endpoint de listagem |
 | **Banco de Dados** | PostgreSQL (Supabase gerenciado) | `jsonb` nativo para blocos de conteúdo |
 | **Storage de Arquivos** | Supabase Storage | Bucket público para leitura, CDN incluso |
 | **Autenticação** | Google OAuth (JWT) | Sem armazenamento de senha |
@@ -299,6 +300,17 @@ A ordem dos blocos no array reflete a ordem de exibição, permitindo a reordena
 
 API RESTful versionada (`/api/v1`), com controllers magros que apenas orquestram o despacho para os Handlers via MediatR. A documentação é exposta via OpenAPI + Swagger UI, gerada automaticamente a partir dos controllers.
 
+### 7.1 Padrão de Listagem e Paginação (Gridify)
+
+**Todo endpoint de listagem** usa **Gridify** (filtro, ordenação e paginação dinâmicos vindos da querystring) e devolve um **envelope padrão de paginação** — nunca uma lista crua (`[ ... ]`). Espelha o padrão já consolidado no `service-escolaweb`.
+
+- **Query de listagem herda de `GridifyQuery`**, que carrega `Page`, `PageSize`, `OrderBy` e `Filter` (bindados automaticamente da querystring → aparecem sozinhos no Swagger).
+- **`Filter` é uma DSL em string** traduzida para SQL (ex.: `Filter=nome=*saude`, `dataCriacao>2026-01-01`). Um **`GridifyMapper` por entidade** faz *whitelist* dos campos filtráveis/ordenáveis — o cliente nunca referencia nome de coluna cru, só os campos expostos.
+- **O repositório aplica filtro + ordenação + paginação sobre o `IQueryable`** (no banco, não em memória) via `GridifyQueryableAsync`, que devolve `(TotalItems, Query)` — `TotalItems` é a contagem **antes** de paginar — e materializa em `Pagina<T>`. Sempre define um **`OrderBy` padrão** quando o cliente não manda: sem `ORDER BY` a paginação é instável.
+- **Resposta padronizada** no envelope `Pagina<T>` (`Domain/Common/Pagina.cs`) → `{ items: [...], totalItems }`. Todos os endpoints de leitura em lista respondem nesse envelope. Nome em pt-br porque o próprio pacote Gridify já exporta um `Paging<T>` (colisão `CS0104`).
+- **Implementação:** pacotes NuGet `Gridify` / `Gridify.EntityFramework` (não a cópia vendorada do `service-escolaweb`; o único patch local relevante lá, `DefaultOrderBy` virtual, vira uma linha no repositório). Config global no `Program.cs`: `EnableEntityFrameworkCompatibilityLayer()` + `IgnoreNotMappedFields = true`.
+- **Aplica-se ao projeto inteiro.** Mesmo em lookup pequeno como **Tags** — onde paginar/filtrar é overkill e os parâmetros raramente serão usados — o padrão é mantido pela **consistência**: um único contrato de listagem em toda a API, sem exceções ad-hoc.
+
 ### Módulos de Endpoint (visão de alto nível)
 
 | Módulo | Responsabilidade |
@@ -334,6 +346,7 @@ API RESTful versionada (`/api/v1`), com controllers magros que apenas orquestram
 | 16 | Erros de domínio via **exceções** + `ExceptionHandlingMiddleware` | Reusa o middleware do FluentValidation; controllers magros |
 | 17 | Testes de integração com **Testcontainers** (Postgres real) | Valida `jsonb` e constraints reais; InMemory testaria ficção |
 | 18 | Pipeline MediatR: Validation + Logging + **UnitOfWork** (commit atômico nos Commands) | Garante Like + contador desnormalizado na mesma transação |
+| 19 | **Gridify** como padrão de listagem em **todo o projeto**; Query herda `GridifyQuery`, resposta no envelope `Pagina<T>` (`{ items, totalItems }`) | Contrato único de listagem (filtro/ordenação/paginação dinâmicos) em toda a API, espelhando o `service-escolaweb`. Mantido mesmo onde é overkill (Tags) pela consistência; ver §7.1 |
 
 ---
 

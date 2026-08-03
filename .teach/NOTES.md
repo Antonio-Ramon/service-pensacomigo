@@ -57,6 +57,23 @@
   Token Google inválido → 422 (reusa RegraDeNegocio; sem tipo p/ 401 ainda, `ponytail:` no validator).
   **Pendências infra**: ClientId/Jwt:Key reais via secrets; teste integração do login precisa de Docker.
 
+- [x] Fatia 12 — Feature Tags: Command + Query juntos (aula 0012). Primeira feature CRUD não-auth.
+  `CriarTagCommand`([Authorize]) + `ListarTagsQuery`([AllowAnonymous]) no MESMO `TagsController`.
+  Slug calculado no handler (Normalize FormD → tira NonSpacingMark → regex hífen); `RegraDeNegocioException`
+  (422) na colisão de slug antes do índice único (evita 500). Repo ganhou `ListarAsync`(AsNoTracking/OrderBy)
+  + `ExistePorSlugAsync`. Teste integração `TagsTests` (401 sem token / 200+slug com token do seed via
+  IJwtTokenGenerator da DI / GET anônimo lista). Build verde (8 proj, 0 erro). **Sem Docker aqui** → teste
+  não rodou (infra do usuário). Warning MSB3277 EF pré-existente. **Ticket 03 fechado no código.**
+
+- [x] Fatia 13 — Gridify, padrão de listagem project-wide (aula 0013). NuGet `Gridify` 2.19.1 +
+  `Gridify.EntityFramework` (vendorar do escolaweb descartado). `Pagina<T>` em `Domain/Common`
+  (nome pt-br: o pacote já tem `Paging<T>` → `CS0104`). `ListarTagsQuery : GridifyQuery` virou
+  **class** (record não herda de classe comum), controller com `[FromQuery]`. `TagRepository`
+  usa `GridifyQueryableAsync` + `GridifyMapper` whitelist (nome/slug) e força `OrderBy=nome`
+  (sem ORDER BY a paginação é instável). Config global no `Program.cs`. `TagsTests` cobre envelope
+  + `?filter=`. Build verde (8 proj, 0 erro). **Sem Docker aqui** → teste não rodou.
+  Fecha follow-up da issue 01 e conforma a issue 03. Aula 12 atualizada com nota + link.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
