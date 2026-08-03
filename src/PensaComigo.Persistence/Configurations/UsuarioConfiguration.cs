@@ -34,7 +34,7 @@ public class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
             {
                 Id = new Guid("a1000000-0000-0000-0000-000000000001"),
                 Nome = "Antonio Ramon",
-                Email = "antonio-ramon-dev@outlook.com",
+                Email = "ar7339347@gmail.com",
                 ImagemUrl = "",
                 IsAdmin = true,
                 DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),

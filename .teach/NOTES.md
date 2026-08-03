@@ -38,6 +38,25 @@
   `AddExceptionHandler` + `app.UseExceptionHandler()`. Build verde. **429 ficou fora** (sem
   rate limiter ainda). Sem controller p/ exercitar de ponta a ponta — vem na Fatia 8 (harness).
 
+- [x] Fatia 9 — Caso de uso vertical CQRS (aula 0009). Primeiro Command/Handler/Controller reais:
+  `LoginGoogleCommand`, handler com a regra, `AuthController` magro (Send), primeiro validator
+  (achado por AddValidatorsFromAssembly). Google/JWT como seams (interfaces) — impl na Fatia 10.
+  `ObterPorEmailAsync` no repo. Build verde. **Endpoint não roda ponta a ponta ainda** (faltam impls+DI).
+  Abriu o Ticket 02.
+
+- [x] Fatia 11 — Endpoint protegido + claims (aula 0011). `[Authorize] GET usuarios/me` (401 auto),
+  lê `sub` do `User` (`ClaimsPrincipal`), `MapInboundClaims=false` no Program p/ nome da claim intacto.
+  Primeiro **Query** CQRS (`ObterPerfilQuery : IQuery<>`, sem commit). Build verde (8 proj, 0 erro).
+  Warning MSB3277 (conflito EF 10.0.4/10.0.9 em IntegrationTests) pré-existente. Não roda ponta a
+  ponta aqui (precisa JWT real + Docker). **Ticket 02 fechado no código.**
+
+- [x] Fatia 10 — Seams Google + JWT (aula 0010). `GoogleTokenValidator` (Google.Apis.Auth 1.75.0,
+  valida assinatura + `aud==Google:ClientId`) e `JwtTokenGenerator` (chave simétrica `Jwt:Key`,
+  claims sub/email/is_admin, 8h) em `Web/Auth/`. 2 `AddScoped` no Program ligam os seams. `Google:ClientId`
+  no appsettings. Build verde (8 proj, 0 warn). Impls no HOST (sem projeto Infrastructure — YAGNI).
+  Token Google inválido → 422 (reusa RegraDeNegocio; sem tipo p/ 401 ainda, `ponytail:` no validator).
+  **Pendências infra**: ClientId/Jwt:Key reais via secrets; teste integração do login precisa de Docker.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

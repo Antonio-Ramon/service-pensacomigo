@@ -18,11 +18,16 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 **Ticket 01 — Fundação (Persistence + Spine Web/Application)**.
 
 ## Roadmap do Ticket 01 (fatias)
-1. **Mapeamento EF Core + DbContext** ← *estamos aqui*
+1. **Mapeamento EF Core + DbContext**
 2. Conversor `jsonb` para `List<Bloco>` (HasConversion)
 3. Repository pattern (interfaces no Domain, esqueletos no Persistence, DI)
 4. Migration inicial + seed + conexão Supabase
 5. Pipeline MediatR (CQRS + Validation/Logging/UnitOfWork behaviors)
 6. ExceptionHandlingMiddleware + exceções tipadas
 7. Swagger + versionamento + JWT
-8. Harness de integração (WebApplicationFactory + Testcontainers)
+8. Harness de integração (WebApplicationFactory + Testcontainers) — *Ticket 01 fechado*
+
+## Roadmap do Ticket 02 (Auth Google + JWT)
+9. **Fatia vertical CQRS**: 1º Command/Handler/Controller + validator (login) ← *estamos aqui*
+10. Implementar os seams: validar token Google (Google.Apis.Auth) + emitir JWT + DI → login roda
+11. ✅ `GET` perfil autenticado: `[Authorize]` + ler claims do `ClaimsPrincipal` + 1º Query CQRS

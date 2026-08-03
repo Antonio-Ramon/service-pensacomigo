@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using PensaComigo.Application;
+using PensaComigo.Application.Auth;
 using PensaComigo.Persistence;
+using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,21 +14,32 @@ builder.Services.AddControllers();
 builder.Services.AddApplication();
 builder.Services.AddPersistence(builder.Configuration);
 
+// Impls dos seams de auth (Fatia 10). Ficam no host: dependem de config e de libs externas
+// que a Application não pode conhecer. O teste de integração troca IGoogleTokenValidator por fake.
+builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
+builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 // Valida o JWT PRÓPRIO (emitido no login da Fatia 02), chave simétrica via user-secrets.
 var jwt = builder.Configuration.GetSection("Jwt");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options => options.TokenValidationParameters = new TokenValidationParameters
+    .AddJwtBearer(options =>
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwt["Issuer"],
-        ValidAudience = jwt["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"] ?? "")),
+        // Sem isso o handler renomeia `sub`→`nameidentifier`, `email`→`.../emailaddress` etc.
+        // Desligado: as claims chegam no User com o MESMO nome que o JwtTokenGenerator escreveu.
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwt["Issuer"],
+            ValidAudience = jwt["Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"] ?? "")),
+        };
     });
 builder.Services.AddAuthorization();
 

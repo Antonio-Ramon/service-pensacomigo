@@ -9,6 +9,9 @@ public class UsuarioRepository(PensaComigoDbContext db) : IUsuarioRepository
     public Task<Usuario?> ObterPorIdAsync(Guid id, CancellationToken ct = default) =>
         db.Usuarios.FirstOrDefaultAsync(u => u.Id == id, ct);
 
+    public Task<Usuario?> ObterPorEmailAsync(string email, CancellationToken ct = default) =>
+        db.Usuarios.FirstOrDefaultAsync(u => u.Email == email, ct);
+
     public async Task AdicionarAsync(Usuario usuario, CancellationToken ct = default) =>
         await db.Usuarios.AddAsync(usuario, ct);
 }
