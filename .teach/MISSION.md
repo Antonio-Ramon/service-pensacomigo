@@ -44,4 +44,11 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Roadmap do Ticket 04 (Imagens — signed URL)
 14. ✅ **Chamar API externa do jeito .NET**: typed `HttpClient` (`AddHttpClient`) + Options pattern
     (`IOptions<T>` + `ValidateOnStart`). Seam `IStorage`, impl Supabase no host, path montado no
-    servidor a partir da claim. ← *estamos aqui*
+    servidor a partir da claim.
+
+## Roadmap do Ticket 05 (Post — criar / editar / deletar)
+15. ✅ **Função pura + primeiro teste unitário**: `GeradorSlug` (normaliza + colisão `-N`) e
+    `CalculadoraTempoLeitura` em `Application/Common`, testados no projeto `UnitTests`
+    (roda sem Docker). Pirâmide de testes, `[Fact]` vs `[Theory]`. ← *estamos aqui*
+16. **`CriarPostCommand`**: relação N:N com Tags + `List<Bloco>` gravado no jsonb de verdade.
+17. **Editar (slug congelado) + deletar** + teste de integração contra Postgres real.

@@ -7,8 +7,8 @@
 **Status:** ready-for-agent
 
 - [ ] Criar post: título, capa (path), tags (N:N via `Post.Tags`), conteúdo `List<Bloco>` (texto/imagem/link, flat, com ordem)
-- [ ] `GeradorSlug` no Shared: normaliza (sem acento/pontuação, minúsculo, espaço→`-`), gera na criação, congela na edição, colisão resolve com sufixo `-N` [unit]
-- [ ] `TempoLeitura` calculado no handler ao salvar [unit]
+- [x] `GeradorSlug` ~~no Shared~~ **em `Application/Common`**: normaliza (sem acento/pontuação, minúsculo, espaço→`-`), colisão resolve com sufixo `-N` [unit] — *Shared referencia Application, então a Application não enxergaria de volta*
+- [x] `CalculadoraTempoLeitura` em `Application/Common` [unit] — *falta plugar no handler (item "Criar post")*
 - [ ] Editar post (título, capa, tags, conteúdo) — slug permanece fixo
 - [ ] Deletar post
 - [ ] Escrita/edição/delete exigem JWT
