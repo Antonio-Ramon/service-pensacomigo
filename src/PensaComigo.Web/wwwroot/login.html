@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Login — Pensa Comigo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 4rem auto; padding: 0 1rem; }
+    pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Login Google → JWT do backend</h1>
+  <div id="botao"></div>
+
+  <h2>Resultado</h2>
+  <pre id="saida">Faça login…</pre>
+  <button onclick="navigator.clipboard.writeText(window.jwt || '')">Copiar JWT</button>
+
+  <script>
+    // ▼▼▼ COLE SEU CLIENT ID AQUI ▼▼▼
+    const CLIENT_ID = "1067065360114-sq0tfq5rkhqu6ni4d49ukcvt9bbhvj48.apps.googleusercontent.com";
+
+    // Página servida pelo próprio backend (mesma origem) → sem CORS.
+    // No Google Console, registre http://localhost:5001 como "Authorized JavaScript origin".
+    async function onGoogle(resp) {
+      const saida = document.getElementById("saida");
+      saida.textContent = "Chamando /api/v1/auth/login…";
+      const r = await fetch("/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken: resp.credential }),
+      });
+      const body = await r.text();
+      if (!r.ok) { saida.textContent = `Erro ${r.status}\n${body}`; return; }
+      const data = JSON.parse(body);
+      window.jwt = data.token;
+      saida.textContent = `Nome: ${data.nome}\n\nJWT:\n${data.token}`;
+    }
+
+    window.onGoogleLibLoaded = () => {
+      google.accounts.id.initialize({ client_id: CLIENT_ID, callback: onGoogle });
+      google.accounts.id.renderButton(document.getElementById("botao"), { size: "large" });
+    };
+  </script>
+  <script src="https://accounts.google.com/gsi/client" onload="onGoogleLibLoaded()"></script>
+</body>
+</html>
