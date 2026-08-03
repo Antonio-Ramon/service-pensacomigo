@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 16 — N:N com o change tracker e o jsonb de verdade</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>N:N com o change tracker e o jsonb de verdade</h1>
+<p class="sub">Aula 16 · Fatia 16 · Ticket 05 — <code>CriarPostCommand</code></p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> <code>POST /api/v1/posts</code> existe. Um comando só grava em
+<strong>três formas diferentes</strong> ao mesmo tempo: colunas normais, uma coluna
+<code>jsonb</code> (o array de blocos) e linhas numa tabela de junção (<code>post_tags</code>) que
+nenhuma entidade sua enxerga. E as duas funções puras da Fatia 15 finalmente entraram no handler.
+</div>
+
+<h2>1. O caso de uso inteiro em 4 passos</h2>
+<pre><code>slug        = ResolverColisao(Gerar(titulo), <span class="cmt">slugs já ocupados no banco</span>)   <span class="cmt">← puro (Fatia 15)</span>
+tags        = repo.ObterPorIdsAsync(cmd.TagIds)                       <span class="cmt">← I/O</span>
+tempo       = CalculadoraTempoLeitura.Calcular(cmd.Conteudo)          <span class="cmt">← puro (Fatia 15)</span>
+posts.AdicionarAsync(new Post { … })                                  <span class="cmt">← I/O</span></code></pre>
+<p>
+É o <em>impureim sandwich</em> da aula passada, agora com recheio real. Repare que
+<strong>nada aqui commita</strong>: o <code>UnitOfWorkBehavior</code> (Fatia 5) vê que o request é
+<code>IBaseCommand</code> e chama o <code>SaveChanges</code> depois que o handler retorna. É naquele
+único <code>SaveChanges</code> que os três formatos de escrita acontecem juntos, numa transação.
+</p>
+
+<h2>2. O ponto da aula: N:N é sobre <em>identidade</em>, não sobre dados</h2>
+<p>
+A tentação é montar as tags a partir do que chegou no JSON:
+</p>
+<pre><code><span class="cmt">// ERRADO — parece inofensivo e duplica o banco inteiro</span>
+Tags = cmd.TagIds.Select(id =&gt; new Tag { Id = id }).ToList()</code></pre>
+<p>
+O EF Core não olha para o <code>Id</code> e conclui "ah, essa já existe". Ele olha para o
+<strong>change tracker</strong>: toda entidade que ele não conhece entra como
+<code>EntityState.Added</code>. Resultado do <code>SaveChanges</code>: um
+<code>INSERT INTO tags</code> — que estoura o índice único do slug, ou pior, passa e duplica a tag.
+</p>
+<p>
+Por isso o repositório <strong>carrega</strong> as tags, e de propósito <em>sem</em>
+<code>AsNoTracking()</code>:
+</p>
+<pre><code><span class="cmt">// TagRepository — o único método do repo que NÃO usa AsNoTracking</span>
+public Task&lt;List&lt;Tag&gt;&gt; ObterPorIdsAsync(IEnumerable&lt;Guid&gt; ids, CancellationToken ct = default) =&gt;
+    db.Tags.Where(t =&gt; ids.Contains(t.Id)).ToListAsync(ct);</code></pre>
+<p>
+Entidades vindas dessa consulta chegam ao tracker como <code>Unchanged</code>. Aí, ao pendurá-las
+em <code>post.Tags</code>, o EF conclui a única coisa que sobrou para concluir: <em>a tag já existe,
+o post é novo, então o que mudou foi o vínculo</em> — e emite só o <code>INSERT INTO post_tags</code>.
+</p>
+<div class="card tip">
+<strong>Regra de bolso:</strong> <code>AsNoTracking()</code> em tudo que é leitura pura (como o
+<code>ListarAsync</code> do Gridify, Fatia 13). Tracking quando a entidade lida vai
+<strong>participar de uma escrita</strong>. É a diferença entre consultar e relacionar.
+</div>
+<p>
+E a tabela <code>post_tags</code>? Não tem classe, não tem <code>DbSet</code>. Ela existe só no
+<code>PostConfiguration</code> (Fatia 1), naquele <code>UsingEntity("post_tags", …)</code> — o EF
+chama isso de <a href="https://learn.microsoft.com/en-us/ef/core/modeling/relationships/many-to-many">skip
+navigation</a>: você navega <code>Post.Tags</code> e a junção fica invisível.
+</p>
+
+<h2>3. O jsonb parando de ser teoria</h2>
+<p>
+Na Fatia 2 você configurou <code>HasConversion</code> + <code>ValueComparer</code> para
+<code>List&lt;Bloco&gt;</code> e não tinha o que gravar. Agora tem. O que o EF faz no
+<code>SaveChanges</code>:
+</p>
+<pre><code>C#:        List&lt;Bloco&gt; { Bloco{Tipo=Texto, Html="&lt;p&gt;…"}, Bloco{Tipo=Imagem, ImagemPath="…"} }
+             ↓  HasConversion(JsonSerializer.Serialize)
+Postgres:  coluna `conteudo` jsonb  →  [{"tipo":0,"ordem":1,"html":"&lt;p&gt;…"}, …]</code></pre>
+<p>
+Duas consequências que você precisa carregar daqui pra frente:
+</p>
+<ul>
+<li><strong>É um blob, não uma tabela.</strong> Não dá pra <code>WHERE</code> num campo de bloco via
+LINQ, não dá pra ordenar por ele, não tem FK. Por isso <code>Tag</code> é entidade (você navega,
+filtra e conta por ela) e <code>Bloco</code> é <code>jsonb</code> (você só lê e escreve inteiro).</li>
+<li><strong>Ordem é dado, não é o índice do array.</strong> O handler grava
+<code>[.. cmd.Conteudo.OrderBy(b =&gt; b.Ordem)]</code> — o campo <code>Ordem</code> é a verdade; a
+posição no array é só uma conveniência de leitura.</li>
+</ul>
+<div class="card tip">
+<strong>Sintaxe nova de C#:</strong> aquele <code>[.. algo]</code> é a
+<a href="https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/collection-expressions">collection
+expression</a> com <em>spread</em> (C# 12). <code>[.. lista.OrderBy(…)]</code> é
+<code>lista.OrderBy(…).ToList()</code> com o tipo inferido do destino — o mesmo <code>[]</code> que
+você já viu inicializando <code>public List&lt;Bloco&gt; Conteudo { get; set; } = [];</code>.
+</div>
+
+<h2>4. Validar um modelo <em>flat</em>: <code>RuleForEach</code> + switch expression</h2>
+<p>
+<code>Bloco</code> é flat de propósito (CLAUDE.md): texto, imagem e link coexistem como campos
+nuláveis e o <code>Tipo</code> diz quais valem. O preço disso é que o compilador não garante nada —
+um bloco <code>Tipo=Texto</code> com <code>Html=null</code> compila liso. Quem cobra a coerência é
+o validator, na fronteira:
+</p>
+<pre><code>RuleForEach(c =&gt; c.Conteudo).Must(Coerente)
+    .WithMessage("Bloco incompleto: cada tipo exige o seu campo…");
+
+private static bool Coerente(Bloco b) =&gt; b.Tipo switch
+{
+    TipoBloco.Texto  =&gt; !string.IsNullOrWhiteSpace(b.Html),
+    TipoBloco.Imagem =&gt; !string.IsNullOrWhiteSpace(b.ImagemPath),
+    TipoBloco.Link   =&gt; !string.IsNullOrWhiteSpace(b.LinkUrl),
+    _ =&gt; false,
+};</code></pre>
+<p>
+<code>RuleForEach</code> aplica a regra item a item e o erro sai com índice
+(<code>Conteudo[2]</code>), então o front sabe qual bloco pintar de vermelho. O
+<code>switch</code> aqui é <strong>expressão</strong>, não comando: cada braço <em>é</em> o valor de
+retorno, e o <code>_</code> é o descarte obrigatório. O 422 sai sozinho — <code>ValidationBehavior</code>
+(Fatia 5) roda antes do handler e o <code>GlobalExceptionHandler</code> (Fatia 6) formata.
+</p>
+
+<h2>5. Request ≠ Command (de novo)</h2>
+<pre><code>CriarPostRequest(Titulo, ImagemCapa, TagIds, Conteudo)          <span class="cmt">o que o cliente manda</span>
+CriarPostCommand(<b>AutorId</b>, Titulo, ImagemCapa, TagIds, Conteudo)  <span class="cmt">o que o handler recebe</span></code></pre>
+<p>
+Mesmo movimento da Fatia 14: o <code>AutorId</code> sai de
+<code>User.FindFirstValue(JwtRegisteredClaimNames.Sub)</code>, nunca do corpo. Se viesse do JSON,
+qualquer autor autenticado publicaria assinando o nome de outro. Vale a regra:
+<strong>todo campo que responde "de quem é isso?" vem da claim</strong>.
+</p>
+
+<h2>6. Onde o erro amigável mora</h2>
+<pre><code>tag inexistente no TagIds  →  NaoEncontradoException  →  404   <span class="cmt">Except() acha quais faltaram</span>
+bloco incoerente           →  ValidationException     →  422   <span class="cmt">antes do handler</span>
+sem token                  →  —                       →  401   <span class="cmt">[Authorize], sem código seu</span></code></pre>
+<p>
+O <code>cmd.TagIds.Except(vinculadas.Select(t =&gt; t.Id))</code> é diferença de conjuntos do LINQ:
+o que foi pedido menos o que voltou do banco = o que não existe. Sem isso, um id inventado sumiria
+em silêncio e o post nasceria com menos tags do que o autor escolheu — o pior tipo de bug, o que
+não reclama.
+</p>
+
+<h2>7. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>new Tag { Id = id }</code> quebraria a associação N:N?</p>
+<button>Porque o construtor vazio deixa <code>Slug</code> nulo e a coluna é <code>IsRequired</code></button>
+<button>Porque o EF não conhece a instância e a marca como Added, tentando inserir a tag</button>
+<button>Porque a tabela de junção não tem entidade, então exige objetos vindos do DbSet</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>ObterPorIdsAsync</code> é o único método do repo sem <code>AsNoTracking</code>?</p>
+<button>Porque consultas por lista de ids não podem ser rastreadas junto com filtro Contains</button>
+<button>Porque sem tracking o EF recarrega as tags a cada acesso e derruba a performance</button>
+<button>Porque essas entidades vão participar de uma escrita, e o tracker decide o que emitir</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que <code>Bloco</code> é jsonb e <code>Tag</code> é entidade?</p>
+<button>Porque tag é navegada, filtrada e contada; bloco só é lido e gravado por inteiro</button>
+<button>Porque bloco é value object e o EF Core proíbe tabela própria para tipo sem chave</button>
+<button>Porque tag tem data de criação, e coluna jsonb não aceita campo do tipo timestamp</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>4.</strong> O que <code>RuleForEach</code> resolve que o compilador não resolve?</p>
+<button>Ele gera o índice do array na resposta, que o modelo flat não consegue expressar</button>
+<button>Ele cobra a coerência do modelo flat: campo nulável exigido pelo tipo do bloco</button>
+<button>Ele valida antes do handler, evitando que o UnitOfWork commite dado incompleto</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>5.</strong> Por que o <code>AutorId</code> não está no <code>CriarPostRequest</code>?</p>
+<button>Porque o MediatR já injeta o usuário atual em qualquer command via behavior</button>
+<button>Porque o record do request é serializado pelo System.Text.Json sem tipo Guid</button>
+<button>Porque quem responde "de quem é isso?" vem da claim: no corpo, daria pra assinar por outro</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/change-tracking/">Change Tracking in EF Core
+(Microsoft Learn)</a> — leia <em>"Tracking vs. No-Tracking Queries"</em> e
+<em>"Changing Foreign Keys and Navigations"</em>; é a explicação canônica do erro da seção 2.
+Complemento:
+<a href="https://learn.microsoft.com/en-us/ef/core/modeling/relationships/many-to-many">Many-to-many
+relationships</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0015-funcao-pura-teste-unitario.html">Aula 15 — função pura e teste unitário</a>.
+Próxima: Fatia 17 — editar (slug <em>congelado</em>) e deletar: aí entra o outro lado do change
+tracker, o <code>Update</code>/<code>Remove</code>, e a pergunta "é seu mesmo?" (autorização por dono).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

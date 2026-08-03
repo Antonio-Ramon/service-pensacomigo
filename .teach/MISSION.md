@@ -49,6 +49,8 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Roadmap do Ticket 05 (Post — criar / editar / deletar)
 15. ✅ **Função pura + primeiro teste unitário**: `GeradorSlug` (normaliza + colisão `-N`) e
     `CalculadoraTempoLeitura` em `Application/Common`, testados no projeto `UnitTests`
-    (roda sem Docker). Pirâmide de testes, `[Fact]` vs `[Theory]`. ← *estamos aqui*
-16. **`CriarPostCommand`**: relação N:N com Tags + `List<Bloco>` gravado no jsonb de verdade.
-17. **Editar (slug congelado) + deletar** + teste de integração contra Postgres real.
+    (roda sem Docker). Pirâmide de testes, `[Fact]` vs `[Theory]`.
+16. ✅ **`CriarPostCommand`**: N:N com Tags via change tracker + `List<Bloco>` no jsonb de verdade;
+    `RuleForEach` no modelo flat; autor da claim. ← *estamos aqui*
+17. **Editar (slug congelado) + deletar**: outro lado do change tracker (`Update`/`Remove`) e
+    autorização por dono ("é seu mesmo?").
