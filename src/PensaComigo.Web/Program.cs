@@ -1,4 +1,6 @@
 using System.Text;
+using Gridify;
+using Gridify.EntityFramework;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -7,6 +9,12 @@ using PensaComigo.Application.Auth;
 using PensaComigo.Persistence;
 using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
+using PensaComigo.Web.Swagger;
+
+// Gridify (padrão de listagem, arquitetura §7.1): traduz o filtro pra SQL via EF Core e
+// ignora campo não mapeado no GridifyMapper em vez de estourar exceção.
+GridifyGlobalConfiguration.EnableEntityFrameworkCompatibilityLayer();
+GridifyGlobalConfiguration.IgnoreNotMappedFields = true;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -55,10 +63,8 @@ builder.Services.AddSwaggerGen(options =>
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
     });
-    options.AddSecurityRequirement(_ => new OpenApiSecurityRequirement
-    {
-        [new OpenApiSecuritySchemeReference("Bearer")] = [],
-    });
+    // Cadeado por rota (só nas [Authorize]) em vez de requisito global.
+    options.DocumentFilter<SecurityRequirementOperationFilter>();
 });
 
 var app = builder.Build();
@@ -68,7 +74,8 @@ app.UseExceptionHandler();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    // Já abre em modo editável: sem precisar clicar em "Try it out" a cada endpoint.
+    app.UseSwaggerUI(ui => ui.EnableTryItOutByDefault());
 }
 
 app.UseHttpsRedirection();
