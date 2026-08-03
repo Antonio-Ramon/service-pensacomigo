@@ -29,6 +29,11 @@ public class TagRepository(PensaComigoDbContext db) : ITagRepository
     public Task<bool> ExistePorSlugAsync(string slug, CancellationToken ct = default) =>
         db.Tags.AnyAsync(t => t.Slug == slug, ct);
 
+    // SEM AsNoTracking de propósito: o handler pendura essas instâncias no Post e o
+    // change tracker precisa saber que elas já existem (senão o EF tenta INSERT na tag).
+    public Task<List<Tag>> ObterPorIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default) =>
+        db.Tags.Where(t => ids.Contains(t.Id)).ToListAsync(ct);
+
     public async Task AdicionarAsync(Tag tag, CancellationToken ct = default) =>
         await db.Tags.AddAsync(tag, ct);
 }
