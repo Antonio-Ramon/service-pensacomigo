@@ -21,5 +21,6 @@ Spine Web/Application:
 - [x] Config JwtBearer: valida JWT próprio (chave simétrica, todos `Validate*` on), `UseAuthentication` antes de `UseAuthorization`. `[Authorize]` nas rotas de escrita entra com os controllers
 - [x] `public partial class Program {}` no fim do `Program.cs`
 - [x] Harness de integração: `WebApplicationFactory<Program>` + Testcontainers (Postgres real). Smoke test verde exige Docker rodando (passo de infra do usuário)
+- [x] **Infra de listagem (Gridify) — follow-up desta fundação** (arquitetura §7.1 / Decisão #19): pacotes NuGet `Gridify` 2.19.1 + `Gridify.EntityFramework` (vendorar descartado — o único patch relevante do escolaweb, `DefaultOrderBy` virtual, virou uma linha no repositório); envelope `Pagina<T>` em `Domain/Common/Pagina.cs` (`{ items, totalItems }` — nome pt-br evita `CS0104` com o `Paging<T>` do pacote); config global no `Program.cs` (`EnableEntityFrameworkCompatibilityLayer` + `IgnoreNotMappedFields`). Query de listagem herda `GridifyQuery`; repositório usa `GridifyQueryableAsync` com `GridifyMapper` (whitelist) e força `OrderBy` padrão. Primeiro uso: Tags (issue 03).
 
 **Verificável:** migration aplica num Postgres via Testcontainers; API sobe; Swagger abre; teste de integração vazio roda verde.

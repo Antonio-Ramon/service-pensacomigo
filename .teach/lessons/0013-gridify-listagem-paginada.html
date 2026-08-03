@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 13 — Gridify: um contrato só pra toda listagem</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Gridify: filtro, ordem e página vindos da querystring</h1>
+<p class="sub">Aula 13 · Fatia 13 · Infra de listagem (issue 01 follow-up) + conformar Tags (issue 03) · ADR: arquitetura §7.1 / Decisão #19</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> <code>GET /api/v1/tags?filter=nome=*saude&amp;orderBy=nome&amp;page=1&amp;pageSize=10</code>
+funciona — e você não escreveu <em>nenhum</em> <code>if (filtro != null)</code>. Toda listagem
+do projeto passa a responder no mesmo envelope <code>{ items, totalItems }</code>.
+</div>
+
+<h2>1. O problema que o Gridify resolve</h2>
+<p>
+Listagem cresce mal. Começa <code>ListarTags()</code>, depois vem "filtra por nome", "ordena por
+data", "pagina", e o handler vira uma escada de <code>if</code>. O Gridify move isso pra
+<strong>uma string na querystring</strong> traduzida pra SQL:
+</p>
+<pre><code>?filter=nome=*saude          <span class="cmt">contém "saude"</span>
+?filter=slug=saude-mental    <span class="cmt">igual</span>
+?filter=nome=*a,slug=*b      <span class="cmt">vírgula = AND · barra vertical = OR</span>
+&amp;orderBy=nome desc&amp;page=2&amp;pageSize=20</code></pre>
+<p>
+Isso é a <a href="https://alirezanet.github.io/Gridify/guide/filtering">DSL de filtro</a> do
+Gridify. Ela vira <strong>Expression tree</strong> → o EF Core traduz pra SQL → filtra
+<strong>no banco</strong>, não em memória.
+</p>
+
+<h2>2. As 4 peças (e onde cada uma mora)</h2>
+<pre><code>Domain/Common/Pagina.cs            <span class="cmt">envelope { Items, TotalItems }</span>
+Application/Tags/Listar/…Query.cs  <span class="cmt">: GridifyQuery — Page/PageSize/OrderBy/Filter</span>
+Persistence/…/TagRepository.cs     <span class="cmt">GridifyMapper (whitelist) + GridifyQueryableAsync</span>
+Web/Program.cs                     <span class="cmt">config global (camada de compat do EF)</span></code></pre>
+
+<h3>2.1 A Query herda <code>GridifyQuery</code></h3>
+<pre><code>public class ListarTagsQuery : GridifyQuery, IQuery&lt;Pagina&lt;TagResponse&gt;&gt;;</code></pre>
+<p>
+Herdar já dá <code>Page</code>, <code>PageSize</code>, <code>OrderBy</code> e <code>Filter</code>.
+O controller recebe com <code>[FromQuery]</code> e o model binder preenche sozinho — os 4
+parâmetros <strong>aparecem no Swagger de graça</strong>.
+</p>
+<div class="card">
+<strong>Pegadinha de C#:</strong> virou <code>class</code>, não <code>record</code>. Um
+<code>record</code> só pode herdar de outro <code>record</code> — <code>GridifyQuery</code> é
+classe comum. Foi por isso que a Query mudou de forma.
+</div>
+
+<h3>2.2 O Mapper é uma <em>whitelist</em></h3>
+<pre><code>private static readonly IGridifyMapper&lt;Tag&gt; Mapper = new GridifyMapper&lt;Tag&gt;()
+    .AddMap("nome", t =&gt; t.Nome)
+    .AddMap("slug", t =&gt; t.Slug);</code></pre>
+<p>
+Sem isso o cliente estaria filtrando por <strong>nome de propriedade da entidade</strong> —
+qualquer uma, inclusive as que você não quer expor. O mapper define o vocabulário público da
+listagem. Existe <code>GenerateMappings()</code> (mapeia tudo automaticamente); aqui a lista é
+curta, então é explícita — mais seguro e mais legível.
+</p>
+
+<h3>2.3 O repositório aplica tudo no <code>IQueryable</code></h3>
+<pre><code>if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "nome";
+
+var (total, query) = await db.Tags.AsNoTracking()
+                             .GridifyQueryableAsync(consulta, Mapper, ct);
+return new Pagina&lt;Tag&gt;(await query.ToListAsync(ct), total);</code></pre>
+<p>
+<code>GridifyQueryableAsync</code> devolve <strong>a contagem antes de paginar</strong> +
+o <code>IQueryable</code> já filtrado/ordenado/paginado. Duas idas ao banco: um
+<code>COUNT</code> e um <code>SELECT … LIMIT/OFFSET</code>.
+</p>
+<div class="card">
+<strong>Por que forçar um <code>OrderBy</code> padrão:</strong> sem <code>ORDER BY</code>, o
+Postgres <em>não garante</em> a mesma ordem entre duas consultas. A página 2 pode repetir ou
+pular linha da página 1. Paginação sem ordenação estável é bug silencioso.
+</div>
+
+<h3>2.4 Config global (uma vez, no <code>Program.cs</code>)</h3>
+<pre><code>GridifyGlobalConfiguration.EnableEntityFrameworkCompatibilityLayer();
+GridifyGlobalConfiguration.IgnoreNotMappedFields = true;</code></pre>
+<p>
+A primeira faz o Gridify gerar Expressions que o <strong>EF Core sabe traduzir</strong> pra SQL.
+A segunda faz campo não mapeado ser <em>ignorado</em> em vez de estourar exceção — cliente
+mandando <code>?filter=xpto=1</code> não derruba o endpoint.
+</p>
+
+<h2>3. O envelope: nunca devolva lista crua</h2>
+<pre><code>public record Pagina&lt;T&gt;(IReadOnlyList&lt;T&gt; Items, int TotalItems);</code></pre>
+<pre><code>{ "items": [ { "id": "…", "nome": "Saúde Mental", "slug": "saude-mental" } ],
+  "totalItems": 1 }</code></pre>
+<p>
+Um array puro (<code>[ … ]</code>) não tem onde carregar o total — e sem total o frontend não
+monta paginador. Trocar depois é <em>breaking change</em>; por isso o envelope é o padrão
+<strong>desde o primeiro endpoint</strong>, mesmo onde é overkill (Tags é lookup pequeno).
+Consistência &gt; economia pontual: a API inteira tem <strong>um</strong> contrato de listagem.
+</p>
+<p class="sub">
+Nome <code>Pagina&lt;T&gt;</code> (não <code>Paging&lt;T&gt;</code>) porque o próprio pacote Gridify
+já tem um <code>Paging&lt;T&gt;</code> — nomes iguais no escopo dão
+<code>CS0104: ambiguous reference</code>. Domínio em pt-br resolve a colisão de graça.
+</p>
+
+<h2>4. Duas decisões de arquitetura embutidas</h2>
+<ul>
+<li><strong>Pacote NuGet, não código vendorado.</strong> O <code>service-escolaweb</code> tem uma
+cópia interna do Gridify (com um <code>DefaultOrderBy</code> customizado). Aqui usamos
+<code>Gridify</code> + <code>Gridify.EntityFramework</code> do NuGet e resolvemos a ordem padrão
+com uma linha no repositório — menos código pra manter.</li>
+<li><strong>O repositório devolve <code>Pagina&lt;Tag&gt;</code> materializada</strong>, não
+<code>(IQueryable, total)</code>. Sem AutoMapper/<code>ProjectTo</code> no projeto, expor
+<code>IQueryable</code> na Application só empurraria o EF pra dentro dela. O handler projeta com
+um <code>Select</code> comum.</li>
+</ul>
+
+<h2>5. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> Pra que serve o <code>GridifyMapper</code> da entidade?</p>
+<button>Converte a entidade do banco no DTO de resposta antes de serializar</button>
+<button>Guarda a ordenação padrão aplicada quando o cliente não manda nada</button>
+<button>Define a whitelist de campos que o cliente pode filtrar e ordenar</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> Por que forçar um <code>OrderBy</code> padrão na listagem?</p>
+<button>Sem ordem fixa o banco pode repetir ou pular linhas entre as páginas</button>
+<button>Sem ordem fixa o Gridify não consegue traduzir o filtro para o SQL</button>
+<button>Sem ordem fixa a contagem total sai errada quando existe filtro ativo</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que <code>ListarTagsQuery</code> deixou de ser <code>record</code>?</p>
+<button>Porque agora ela chega pelo binder da querystring, não pelo corpo</button>
+<button>Porque record só herda de record, e GridifyQuery é classe comum</button>
+<button>Porque record é imutável e o Gridify precisa reescrever o filtro</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que a resposta é <code>{ items, totalItems }</code> e não um array?</p>
+<button>Porque o array puro impede o EF Core de paginar direto no banco</button>
+<button>Porque o Gridify só sabe serializar dentro de um objeto envelopado</button>
+<button>Porque o array não carrega o total, que o front usa pro paginador</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://alirezanet.github.io/Gridify/guide/">Documentação do Gridify (filtering, ordering, EF compatibility)</a>
+· <a href="https://learn.microsoft.com/en-us/ef/core/querying/pagination">Paginação no EF Core (Microsoft)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0012-feature-tags-command-query.html">Aula 12 — feature Tags (Command + Query)</a>.
+Próxima: Ticket 04/05 — Post: <code>List&lt;Bloco&gt;</code> jsonb num Command real (e a listagem de posts,
+onde o Gridify finalmente paga por si).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script>
+document.querySelectorAll('.q').forEach(q => {
+  const right = +q.dataset.a, fb = q.querySelector('.fb');
+  q.querySelectorAll('button').forEach((b, i) => b.onclick = () => {
+    q.querySelectorAll('button').forEach(x => x.disabled = true);
+    b.classList.add(i === right ? 'right' : 'wrong');
+    if (i !== right) q.querySelectorAll('button')[right].classList.add('right');
+    fb.textContent = i === right ? '✓ Isso.' : '✗ A verde é a correta — revê a seção acima.';
+  });
+});
+</script>
+</body>
+</html>

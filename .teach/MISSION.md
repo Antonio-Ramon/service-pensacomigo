@@ -31,3 +31,12 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 9. **Fatia vertical CQRS**: 1º Command/Handler/Controller + validator (login) ← *estamos aqui*
 10. Implementar os seams: validar token Google (Google.Apis.Auth) + emitir JWT + DI → login roda
 11. ✅ `GET` perfil autenticado: `[Authorize]` + ler claims do `ClaimsPrincipal` + 1º Query CQRS
+
+## Roadmap do Ticket 03 (Tags)
+12. **Primeira feature CRUD completa**: Command (criar, `[Authorize]`) + Query (listar, `[AllowAnonymous]`)
+    no mesmo controller; slug como campo calculado; 422 amigável vs índice único; teste de integração.
+
+## Fatias transversais (decisões de arquitetura que atravessam tickets)
+13. ✅ **Gridify — padrão de listagem project-wide**: `GridifyQuery` na Query, `GridifyMapper` como
+    whitelist, envelope `Pagina<T>` (`{ items, totalItems }`). Fecha o follow-up da issue 01 e
+    conforma a listagem de Tags (issue 03). ← *estamos aqui*

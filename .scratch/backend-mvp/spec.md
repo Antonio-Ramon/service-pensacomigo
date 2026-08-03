@@ -29,7 +29,7 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 10. Como sistema, quero calcular o tempo de leitura ao salvar o post, para exibi-lo ao leitor.
 11. Como autor, quero atualizar um post existente (título, capa, tags, conteúdo), para corrigir ou melhorar a meditação.
 12. Como autor, quero deletar um post, para remover conteúdo que não deve mais existir.
-13. Como leitor, quero listar posts ordenados por data, para ver as meditações recentes.
+13. Como leitor, quero listar posts com paginação/filtro/ordenação (Gridify), para navegar as meditações — default ordenado por data.
 14. Como leitor, quero abrir um post pelo slug, para ler a meditação completa.
 15. Como leitor, quero que abrir um post incremente a contagem de visualizações, para refletir a popularidade.
 
@@ -53,7 +53,7 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 25. Como sistema, quero limitar a 5 comentários por visitante por minuto, para conter spam.
 26. Como sistema, quero bloquear comentários com palavrão, para manter o tom do blog.
 27. Como leitor, quero que meu comentário limpo apareça imediatamente, para não esperar aprovação.
-28. Como leitor, quero listar os comentários aprovados de um post (com respostas), para ler a conversa.
+28. Como leitor, quero listar os comentários aprovados de um post (com respostas) com paginação (Gridify), para ler a conversa.
 29. Como admin, quero esconder ou deletar um comentário publicado, para moderar conteúdo indevido.
 
 **Likes**
@@ -66,7 +66,7 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 **Tags**
 
 34. Como autor, quero criar tags, para classificar posts.
-35. Como leitor, quero listar tags, para navegar por tema.
+35. Como leitor, quero listar tags (via Gridify, por consistência — filtro/página raramente usados aqui), para navegar por tema.
 36. Como autor, quero associar tags a um post (N:N), para categorizá-lo.
 
 ## Implementation Decisions
@@ -118,6 +118,11 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 **API**
 - REST versionada `/api/v1`, controllers magros que só despacham para os Handlers via MediatR, retornando `ActionResult<T>`. OpenAPI + Swagger UI. Módulos: Auth, Posts, Comentários, Likes, Tags, Usuários.
 
+**Listagem e paginação (Gridify) — padrão project-wide**
+- **Todo endpoint de listagem** usa **Gridify** (filtro/ordenação/paginação dinâmicos via querystring) e responde no **envelope padrão `Paging<T>`** (`{ items, totalItems }`), **nunca** lista crua. Espelha o `service-escolaweb`.
+- Query de listagem **herda de `GridifyQuery`** (traz `Page`, `PageSize`, `OrderBy`, `Filter` — aparecem sozinhos no Swagger). Um **`GridifyMapper` por entidade** faz whitelist dos campos filtráveis/ordenáveis (cliente não vê nome de coluna cru). O repositório aplica filtro+ordem+página no `IQueryable` e retorna `(Query, TotalItems)`.
+- **Aplica-se ao projeto inteiro** — inclusive em lookup pequeno como **Tags**, onde é overkill (parâmetro que quase ninguém usa), mas mantido pela **consistência** do contrato de listagem. Endpoints afetados: listar posts (US 13), listar comentários (US 28), listar tags (US 35). Detalhe em `architecture-pensa-comigo.md §7.1` e Decisão #19.
+
 **Schema (contrato)**
 - Tabelas `usuarios`, `posts`, `tags`, `post_tags`, `comentarios`, `likes` conforme `architecture-pensa-comigo.md §5.4` (com `is_admin default false` e sem índice GIN). Contadores desnormalizados em `posts`. `comentarios.parent_id` auto-referência para 1 nível. `likes` com unique `(post_id, viewer_hash)`.
 
@@ -142,5 +147,5 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 ## Further Notes
 
 - Ordem de implementação combinada: **Domain → Persistence (Context + Configurations + Migration + Seed) → Application (behaviors + use cases) → Web (controllers + middleware + auth) → testes.**
-- Decisões completas e justificativas em `architecture-pensa-comigo.md §8` (Decisões #1–18) e na memória do projeto (`decisoes-arquitetura`).
+- Decisões completas e justificativas em `architecture-pensa-comigo.md §8` (Decisões #1–19) e na memória do projeto (`decisoes-arquitetura`).
 - Detalhes idiomáticos resolvidos na implementação com padrão .NET: versionamento por atributo de rota, `ActionResult<T>`.
