@@ -1,14 +1,18 @@
+using System.Net.Http.Headers;
 using System.Text;
 using Gridify;
 using Gridify.EntityFramework;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using PensaComigo.Application;
 using PensaComigo.Application.Auth;
+using PensaComigo.Application.Storage;
 using PensaComigo.Persistence;
 using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
+using PensaComigo.Web.Storage;
 using PensaComigo.Web.Swagger;
 
 // Gridify (padrão de listagem, arquitetura §7.1): traduz o filtro pra SQL via EF Core e
@@ -26,6 +30,24 @@ builder.Services.AddPersistence(builder.Configuration);
 // que a Application não pode conhecer. O teste de integração troca IGoogleTokenValidator por fake.
 builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
+
+// Storage (Fatia 14). Options pattern: seção tipada + validada NA SUBIDA — sem ServiceRoleKey
+// a aplicação nem sobe, em vez de falhar no primeiro upload.
+builder.Services.AddOptions<SupabaseOptions>()
+    .Bind(builder.Configuration.GetSection("Supabase"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// Typed client: registra IStorage E o HttpClient dele. O handler HTTP fica num pool e é
+// reciclado — nem esgota socket (new HttpClient por chamada) nem envelhece o DNS (static).
+// Barra final na BaseAddress + caminho relativo sem barra inicial, senão o /storage/v1 some.
+builder.Services.AddHttpClient<IStorage, SupabaseStorage>((sp, http) =>
+{
+    var supabase = sp.GetRequiredService<IOptions<SupabaseOptions>>().Value;
+    http.BaseAddress = new Uri($"{supabase.Url.TrimEnd('/')}/storage/v1/");
+    http.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", supabase.ServiceRoleKey);
+});
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

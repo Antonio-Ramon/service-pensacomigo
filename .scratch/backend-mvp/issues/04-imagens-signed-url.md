@@ -4,10 +4,30 @@
 
 **Blocked by:** 02 — Auth.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `Shared/Storage.GerarUrlUploadAssinada(path)`
-- [ ] Endpoint fino (autenticado) devolve a signed URL do Supabase Storage
-- [ ] Teste: endpoint exige JWT e devolve URL assinada para um path
+- [x] Seam `Application/Storage/IStorage.GerarUrlUploadAssinadaAsync(path, ct)` + impl
+      `Web/Storage/SupabaseStorage` (typed HttpClient + `IOptions<SupabaseOptions>`)
+      — mora no host, não em `Shared`, seguindo o precedente dos seams de auth (Fatia 10).
+- [x] Endpoint fino (autenticado) devolve a signed URL do Supabase Storage:
+      `POST /api/v1/imagens/url-upload` → `{ path, urlAssinada }`
+- [x] Teste: endpoint exige JWT, devolve URL assinada e recusa extensão fora da whitelist
+      (`ImagensTests`, seam trocado por fake via `ConfigureTestServices`)
 
 > Gridify (Decisão #19 / arquitetura §7.1): **não se aplica** — sem endpoint de listagem aqui.
+
+## Desvios / decisões
+- **O `path` é montado no servidor** (`posts/{usuarioId-da-claim}/{guid}{ext}`), não recebido do
+  cliente como o texto original sugeria. Signed URL é permissão de escrita — path do cliente
+  permitiria subir na pasta de outro autor. O corpo só manda `nomeArquivo`, e dele só a extensão
+  sobrevive (whitelist `.jpg/.jpeg/.png/.webp`).
+- Caso de uso é `IQuery`, não `ICommand`: nada é gravado no Postgres.
+
+## Follow-ups
+- [ ] `Supabase:Url` e `Supabase:ServiceRoleKey` reais via user-secrets + bucket `imagens`
+      criado no projeto Supabase (infra do usuário).
+- [ ] Teste de integração não rodou aqui — **Docker ausente na máquina** (mesma pendência das
+      issues anteriores).
+- [ ] Falha do Supabase hoje vira 422 (`RegraDeNegocioException`). Quando houver a segunda
+      integração externa, criar um tipo próprio → 502.
+- [ ] Sem retry/timeout no typed client. `AddStandardResilienceHandler` se aparecer flakiness.

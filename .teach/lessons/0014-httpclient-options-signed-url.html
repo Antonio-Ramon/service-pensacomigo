@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 14 — Falar com o mundo lá fora: typed HttpClient + Options</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Typed <code>HttpClient</code> e o Options pattern</h1>
+<p class="sub">Aula 14 · Fatia 14 · Ticket 04 — Imagens (signed URL) · Decisão #14 da arquitetura</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> <code>POST /api/v1/imagens/url-upload</code> (autenticado) devolve
+uma URL assinada do Supabase Storage. O front sobe o arquivo <em>direto lá</em> — o binário
+<strong>nunca passa pelo .NET</strong>. E de quebra você aprende as duas peças que todo serviço
+.NET usa pra falar com API externa.
+</div>
+
+<h2>1. O caso de uso, em uma frase</h2>
+<pre><code>front  ──POST /api/v1/imagens/url-upload──&gt;  nossa API   <span class="cmt">(só JWT + JSON, leve)</span>
+                                                 │
+                                                 └─POST /storage/v1/object/upload/sign/…──&gt; Supabase
+front  ──PUT {urlAssinada} (bytes da imagem)──────────────────────────────────────────────&gt; Supabase</code></pre>
+<p>
+A API só <strong>autoriza e assina</strong>. Se o binário passasse por ela, cada upload de 5&nbsp;MB
+ocuparia uma thread e a banda do servidor à toa. Isso é a
+<a href="https://supabase.com/docs/guides/storage/uploads/standard-uploads">Decisão #14</a>.
+</p>
+
+<h2>2. Problema novo: chamar HTTP de dentro do ASP.NET</h2>
+<p>
+Instinto de quem vem de outra linguagem: <code>new HttpClient()</code> dentro do método. Em .NET
+isso é um bug clássico, e por dois motivos <em>opostos</em>:
+</p>
+<table>
+<tr><th>Jeito</th><th>O que quebra</th></tr>
+<tr><td><code>new HttpClient()</code> por chamada</td><td>cada instância abre socket que fica em <code>TIME_WAIT</code> depois do dispose → <strong>esgota as portas</strong> sob carga</td></tr>
+<tr><td><code>static HttpClient</code> pra sempre</td><td>resolve o DNS uma vez e nunca mais → <strong>não enxerga</strong> mudança de IP do serviço</td></tr>
+</table>
+<p>
+A resposta do .NET é o <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/httpclient-factory"><code>IHttpClientFactory</code></a>:
+o <code>HttpClient</code> é barato e descartável, mas o <code>HttpMessageHandler</code> por baixo dele
+fica num <strong>pool</strong> e é reciclado de tempos em tempos (2&nbsp;min por padrão). Socket reaproveitado, DNS fresco.
+</p>
+
+<h3>2.1 Typed client: a forma que a gente usa</h3>
+<pre><code><span class="cmt">// Program.cs — registra o serviço E o HttpClient dele, já configurado.</span>
+builder.Services.AddHttpClient&lt;IStorage, SupabaseStorage&gt;((sp, http) =&gt;
+{
+    var cfg = sp.GetRequiredService&lt;IOptions&lt;SupabaseOptions&gt;&gt;().Value;
+    http.BaseAddress = new Uri($"{cfg.Url}/storage/v1/");
+    http.DefaultRequestHeaders.Authorization = new("Bearer", cfg.ServiceRoleKey);
+});</code></pre>
+<p>
+Isso substitui o <code>AddScoped&lt;IStorage, SupabaseStorage&gt;</code> que você escreveria por
+reflexo — o <code>AddHttpClient&lt;TInterface, TImpl&gt;</code> <strong>já registra a implementação</strong>
+e injeta um <code>HttpClient</code> pronto no construtor dela. Base address e header de auth
+ficam <em>num lugar só</em>, não repetidos em cada método.
+</p>
+<div class="card tip">
+<strong>Pegadinha da <code>BaseAddress</code>:</strong> a barra final importa.
+Com base <code>…/storage/v1/</code> e caminho relativo <code>object/upload/…</code> (sem barra inicial)
+o .NET concatena. Se o caminho começar com <code>/</code>, ele <strong>substitui</strong> o path da base
+e você perde o <code>/storage/v1</code>.
+</div>
+
+<h2>3. Options pattern: config vira classe</h2>
+<p>
+Até agora a gente leu config assim (<code>JwtTokenGenerator</code>, Fatia 10):
+</p>
+<pre><code>config.GetSection("Jwt")["Key"]!   <span class="cmt">string mágica + ! pra calar o compilador</span></code></pre>
+<p>
+O <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/options">options pattern</a>
+troca isso por um POCO ligado a uma seção do <code>appsettings.json</code>:
+</p>
+<pre><code>public class SupabaseOptions
+{
+    public string Url { get; set; } = "";
+    public string ServiceRoleKey { get; set; } = "";
+    public string Bucket { get; set; } = "imagens";
+}
+
+<span class="cmt">// Program.cs</span>
+builder.Services.AddOptions&lt;SupabaseOptions&gt;()
+    .Bind(builder.Configuration.GetSection("Supabase"))
+    .ValidateOnStart();</code></pre>
+<p>
+O ganho de verdade é o <code>ValidateOnStart()</code>: config faltando derruba a aplicação
+<strong>na subida</strong>, não às 3h da manhã no primeiro upload. E o handler recebe
+<code>IOptions&lt;SupabaseOptions&gt;</code> — tipado, sem string mágica, fácil de trocar no teste.
+</p>
+<div class="card warn">
+<strong><code>ServiceRoleKey</code> é chave de admin do Supabase</strong> — ignora todas as regras
+de RLS. Vive em <code>user-secrets</code>/variável de ambiente, <strong>nunca</strong> no
+<code>appsettings.json</code> comitado (que só guarda a chave vazia) e <strong>nunca</strong> vai pro front.
+Por isso quem assina é o backend.
+</div>
+
+<h2>4. Onde cada peça mora (mesma regra da Fatia 10)</h2>
+<pre><code>Application/Storage/IStorage.cs              <span class="cmt">o seam — contrato, zero Supabase</span>
+Application/Imagens/UrlUpload/…Query.cs      <span class="cmt">caso de uso + validator + response</span>
+Web/Storage/SupabaseOptions.cs               <span class="cmt">config tipada</span>
+Web/Storage/SupabaseStorage.cs               <span class="cmt">impl: HttpClient + IOptions</span>
+Web/Controllers/ImagensController.cs         <span class="cmt">[Authorize], magro</span></code></pre>
+<p>
+A Application não sabe o que é Supabase — ela sabe que existe "algo que assina uma URL de upload".
+Foi assim com <code>IGoogleTokenValidator</code>; é a mesma jogada. É isso que deixa o
+<strong>teste trocar a impl por um fake</strong> sem rede nenhuma.
+</p>
+
+<h2>5. Duas decisões de projeto que valem mais que o código</h2>
+
+<h3>5.1 O <em>path</em> é gerado no servidor</h3>
+<p>
+O ticket diz "devolve a signed URL para um path". Tentador: receber o path do cliente. Só que
+uma URL assinada é uma <strong>permissão de escrita</strong> — se o cliente escolhe o path, ele
+pede <code>posts/&lt;id-de-outro-autor&gt;/capa.png</code> e sobrescreve arquivo alheio. Então:
+</p>
+<pre><code>cliente manda:  { "nomeArquivo": "minha-foto.PNG" }
+servidor monta: posts/{usuarioId-da-claim}/{guid}.png</code></pre>
+<p>
+O cliente só influencia a <strong>extensão</strong> (validada contra uma whitelist). O
+<code>usuarioId</code> vem da claim <code>sub</code> do JWT, não do corpo. Path traversal deixa de existir
+porque não existe path do cliente. Fronteira de confiança: <strong>nunca</strong> confie no caminho que veio de fora.
+</p>
+
+<h3>5.2 É <code>IQuery</code>, não <code>ICommand</code></h3>
+<p>
+Parece escrita ("gerar", "criar"), mas <strong>nada é gravado no nosso banco</strong>. Marcar como
+<code>ICommand</code> faria o <code>UnitOfWorkBehavior</code> (Fatia 5) chamar <code>SaveChanges</code> à toa.
+A regra do nosso CQRS é literal: <em>mudou linha no Postgres? Command. Não mudou? Query.</em>
+O validator roda igual nos dois — quem o dispara é o <code>ValidationBehavior</code>, não o marcador.
+</p>
+
+<h2>6. A chamada ao Supabase, por dentro</h2>
+<pre><code>POST {url}/storage/v1/object/upload/sign/{bucket}/{path}
+Authorization: Bearer {service_role_key}
+{}                                        <span class="cmt">corpo vazio mesmo</span>
+
+← 200 { "url": "/object/upload/sign/imagens/…?token=eyJ…" }   <span class="cmt">relativa!</span></code></pre>
+<p>
+A resposta vem <strong>relativa</strong> — a URL utilizável é <code>{url}/storage/v1</code> + isso.
+Confirmado no <a href="https://github.com/supabase/storage-js/blob/master/src/packages/StorageFileApi.ts">código do
+<code>storage-js</code></a> (o SDK oficial faz exatamente esse POST). O front depois dá um
+<code>PUT</code> nessa URL com os bytes.
+</p>
+
+<h2>7. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>AddHttpClient</code> em vez de <code>new HttpClient()</code> no método?</p>
+<button>O factory serializa o corpo em JSON sem depender de System.Text.Json</button>
+<button>O factory recicla o handler: sem esgotar socket e sem DNS velho</button>
+<button>O factory injeta o token do usuário logado em cada chamada externa</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>2.</strong> O que <code>IOptions&lt;T&gt;</code> dá que <code>config["Supabase:Url"]</code> não dá?</p>
+<button>Recarrega o valor do appsettings sempre que o arquivo muda em disco</button>
+<button>Seção tipada num objeto, validada uma vez na subida da aplicação</button>
+<button>Guarda o segredo cifrado em memória, fora do alcance de um dump</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>3.</strong> Por que o servidor monta o path da imagem em vez de aceitar o do cliente?</p>
+<button>Porque o Supabase recusa qualquer path que não tenha vindo da API</button>
+<button>Porque o cliente não sabe qual bucket a aplicação usa em produção</button>
+<button>Porque path vindo do cliente deixa ele escrever em pasta de outro</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>4.</strong> Por que este caso de uso é <code>IQuery</code> e não <code>ICommand</code>?</p>
+<button>Porque não grava nada no banco — Command faria o UnitOfWork commitar</button>
+<button>Porque Command exige validator e este caso de uso não valida entrada</button>
+<button>Porque Query é o único marcador que o controller lê por querystring</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/httpclient-factory">IHttpClientFactory
+(Microsoft Learn)</a> — leia a seção "Typed clients". Complemento:
+<a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/options">Options pattern</a> ·
+<a href="https://supabase.com/docs/guides/storage/uploads/standard-uploads">Supabase Storage — uploads</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0013-gridify-listagem-paginada.html">Aula 13 — Gridify</a>.
+Próxima: Ticket 05 — Post: <code>List&lt;Bloco&gt;</code> jsonb num Command real (onde o path
+gerado aqui finalmente vira bloco de imagem).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

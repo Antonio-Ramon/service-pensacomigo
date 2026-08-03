@@ -39,4 +39,9 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Fatias transversais (decisões de arquitetura que atravessam tickets)
 13. ✅ **Gridify — padrão de listagem project-wide**: `GridifyQuery` na Query, `GridifyMapper` como
     whitelist, envelope `Pagina<T>` (`{ items, totalItems }`). Fecha o follow-up da issue 01 e
-    conforma a listagem de Tags (issue 03). ← *estamos aqui*
+    conforma a listagem de Tags (issue 03).
+
+## Roadmap do Ticket 04 (Imagens — signed URL)
+14. ✅ **Chamar API externa do jeito .NET**: typed `HttpClient` (`AddHttpClient`) + Options pattern
+    (`IOptions<T>` + `ValidateOnStart`). Seam `IStorage`, impl Supabase no host, path montado no
+    servidor a partir da claim. ← *estamos aqui*

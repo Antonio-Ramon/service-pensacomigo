@@ -74,6 +74,15 @@
   + `?filter=`. Build verde (8 proj, 0 erro). **Sem Docker aqui** → teste não rodou.
   Fecha follow-up da issue 01 e conforma a issue 03. Aula 12 atualizada com nota + link.
 
+- [x] Fatia 14 — Imagens signed URL: typed HttpClient + Options (aula 0014). Seam `IStorage`
+  (Application) + `SupabaseStorage` (Web) via `AddHttpClient<IStorage, SupabaseStorage>` — o typed
+  client JÁ registra a impl. `SupabaseOptions` com `ValidateDataAnnotations().ValidateOnStart()`
+  (app não sobe sem ServiceRoleKey → factory de teste ganhou 2 `UseSetting`). Caso de uso é
+  **`IQuery`** (não escreve no banco). **Path montado no servidor** (`posts/{claim sub}/{guid}{ext}`),
+  cliente só manda o nome — desvio consciente da issue, mata path traversal. `ImagensTests` troca o
+  seam por fake via `ConfigureTestServices`. Build verde (8 proj, 0 erro). **Sem Docker aqui** → teste
+  não rodou. Quiz agora usa `assets/quiz.js` (extraído; aulas antigas seguem com script inline).
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

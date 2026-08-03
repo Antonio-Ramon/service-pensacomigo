@@ -26,6 +26,10 @@ public sealed class PensaComigoApiFactory : WebApplicationFactory<Program>, IAsy
         // Chave de teste pra o JwtTokenGenerator emitir tokens que o AddJwtBearer valida.
         // (>= 32 bytes p/ HS256). Em produção vem de user-secrets.
         builder.UseSetting("Jwt:Key", "chave-de-teste-com-mais-de-32-bytes-para-hs256!!");
+        // SupabaseOptions é validada no start (ValidateOnStart) — sem isso a app nem sobe no teste.
+        // Valores de fachada: quem chama o Supabase de verdade é trocado por fake em ImagensTests.
+        builder.UseSetting("Supabase:Url", "https://teste.supabase.co");
+        builder.UseSetting("Supabase:ServiceRoleKey", "chave-de-teste");
     }
 
     // Explícito: o IAsyncLifetime do xunit v2 usa Task; a base WebApplicationFactory
