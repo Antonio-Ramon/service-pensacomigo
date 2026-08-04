@@ -52,5 +52,11 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
     (roda sem Docker). Pirâmide de testes, `[Fact]` vs `[Theory]`.
 16. ✅ **`CriarPostCommand`**: N:N com Tags via change tracker + `List<Bloco>` no jsonb de verdade;
     `RuleForEach` no modelo flat; autor da claim. ← *estamos aqui*
-17. **Editar (slug congelado) + deletar**: outro lado do change tracker (`Update`/`Remove`) e
+## Revisão do Ticket 04 (Imagens)
+17. ✅ **Upload multipart pelo backend** (Decisão #14 revisada): `IFormFile` → `Stream` na
+    Application, whitelist extensão→content-type, e como se reescreve uma decisão de arquitetura.
+    ← *estamos aqui*
+
+## Continuação do Ticket 05
+18. **Editar (slug congelado) + deletar**: outro lado do change tracker (`Update`/`Remove`) e
     autorização por dono ("é seu mesmo?").

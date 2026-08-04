@@ -8,7 +8,7 @@ Antonio e Jéssica querem publicar meditações cristãs num blog autoral, monta
 
 ## Solution
 
-Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicing) que expõe os casos de uso de posts, comentários, likes, tags, visualizações e autenticação. Persistência em PostgreSQL gerenciado pelo Supabase; imagens no Supabase Storage via signed URL. Autores logam pelo Google (frontend faz o OAuth, backend valida e emite JWT próprio); só emails no seed são admins. Leitores interagem anonimamente, com moderação automática de comentários (rate limit + filtro de palavrão). A API é consumida por um frontend Angular (fora deste escopo).
+Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicing) que expõe os casos de uso de posts, comentários, likes, tags, visualizações e autenticação. Persistência em PostgreSQL gerenciado pelo Supabase; imagens no Supabase Storage, enviadas pelo próprio backend. Autores logam pelo Google (frontend faz o OAuth, backend valida e emite JWT próprio); só emails no seed são admins. Leitores interagem anonimamente, com moderação automática de comentários (rate limit + filtro de palavrão). A API é consumida por um frontend Angular (fora deste escopo).
 
 ## User Stories
 
@@ -42,7 +42,7 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 
 **Imagens**
 
-20. Como autor, quero receber uma signed URL de upload, para enviar a imagem direto ao Supabase Storage sem passar pelo backend.
+20. Como autor, quero enviar a imagem para a API, para que ela guarde no storage e me devolva o path e a URL pública.
 21. Como autor, quero guardar o path/URL da imagem no bloco ou na capa, para referenciá-la no post.
 
 **Comentários**
@@ -109,7 +109,7 @@ Uma API REST em .NET 10 (Clean Architecture + CQRS via MediatR + Vertical Slicin
 - Dedup por constraint única `(post_id, viewer_hash)`. Curtir insere Like e incrementa `qtd_curtidas`; descurtir remove e decrementa — atômico via `UnitOfWorkBehavior`.
 
 **Imagens**
-- Upload via **signed URL**: `Shared/Storage` expõe `GerarUrlUploadAssinada(path)`; endpoint fino gera a URL, frontend sobe direto no Supabase. Binário não passa pelo .NET.
+- Upload **pelo backend** (multipart): `Application/Storage.IStorage.EnviarAsync(path, stream, contentType)`; o endpoint valida (extensão, tamanho, content-type da whitelist), monta o path a partir da claim e repassa ao Supabase Storage. Resposta `{ path, url }` (bucket público para leitura).
 
 **Persistence / banco**
 - EF Core (Npgsql) sobre PostgreSQL do Supabase. SSL obrigatório. Conexão direta (5432) para migrations; pooled Supavisor (6543) para runtime.

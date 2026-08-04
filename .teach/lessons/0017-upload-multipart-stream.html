@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 17 — Upload multipart: IFormFile, Stream e a fronteira da Application</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Upload multipart: <code>IFormFile</code>, <code>Stream</code> e a fronteira da Application</h1>
+<p class="sub">Aula 17 · Fatia 17 · Ticket 04 — Imagens (Decisão #14 <strong>revisada</strong>)</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> <code>POST /api/v1/imagens</code> agora recebe o arquivo de
+verdade. Um passo em vez de dois, e a validação acontece <em>antes</em> de qualquer byte chegar ao
+bucket. Você também derrubou uma decisão de arquitetura registrada — e isso é parte do trabalho.
+</div>
+
+<h2>1. O que mudou e por quê</h2>
+<table>
+<tr><th></th><th>Antes (signed URL)</th><th>Agora</th></tr>
+<tr><td>Passos do cliente</td><td>2 (pede URL, sobe no Supabase)</td><td><strong>1</strong> (manda o arquivo)</td></tr>
+<tr><td>Quem valida o arquivo</td><td>ninguém — a URL era um cheque em branco</td><td><strong>a API</strong>: extensão, tamanho, content-type</td></tr>
+<tr><td>Cliente sabe que existe Supabase?</td><td>sim (sobe lá)</td><td><strong>não</strong></td></tr>
+<tr><td>Carga no .NET</td><td>zero</td><td>5 MB por upload, em <code>Stream</code></td></tr>
+</table>
+<p>
+A Decisão #14 dizia "binário não passa pelo .NET". Ela não estava errada — estava otimizando a
+coisa <em>errada</em> pro tamanho deste projeto. Trocar throughput de servidor por controle e por
+um passo a menos no front é um bom negócio aqui. O que importa: a decisão foi
+<strong>reescrita na tabela de decisões com a data e o motivo</strong>, não apagada. Decisão sem
+rastro vira "por que isso é assim?" daqui a seis meses.
+</p>
+
+<h2>2. <code>IFormFile</code> e o <code>[Consumes]</code></h2>
+<pre><code>[HttpPost]
+[Consumes("multipart/form-data")]                 <span class="cmt">sem isso o Swagger manda JSON e dá 415</span>
+[RequestSizeLimit(ImagensPermitidas.TamanhoMaximoBytes)]
+public async Task&lt;ActionResult&lt;ImagemResponse&gt;&gt; Enviar(IFormFile arquivo, CancellationToken ct)</code></pre>
+<p>
+<code>multipart/form-data</code> é o formato do <code>&lt;input type="file"&gt;</code>: o corpo vem
+picotado em partes, cada uma com nome e cabeçalhos próprios. O ASP.NET casa a parte chamada
+<code>arquivo</code> com o parâmetro <code>arquivo</code> — <strong>o nome do parâmetro é o
+contrato</strong>. E os dois atributos fazem coisas diferentes:
+</p>
+<ul>
+<li><code>[Consumes]</code> — declara o content-type aceito. Serve pro model binder e pro Swagger
+gerar o botão de escolher arquivo em vez de uma caixa de JSON.</li>
+<li><code>[RequestSizeLimit]</code> — corta o request no <strong>servidor</strong>, antes de você.
+O validator também barra 5 MB, mas só depois de o corpo inteiro subir. Os dois existem por
+motivos diferentes: o atributo protege a máquina, o validator dá a mensagem amigável.</li>
+</ul>
+
+<h2>3. Onde o ASP.NET para de existir</h2>
+<pre><code>await using var conteudo = arquivo.OpenReadStream();
+var command = new EnviarImagemCommand(usuarioId, arquivo.FileName, arquivo.Length, conteudo);</code></pre>
+<p>
+<code>IFormFile</code> vive em <code>Microsoft.AspNetCore.Http</code> — é um tipo <em>de web</em>.
+Se ele entrasse no Command, a Application passaria a depender do ASP.NET e o caso de uso só
+existiria dentro de um request HTTP. Por isso o controller <strong>desmonta</strong> o
+<code>IFormFile</code> em três coisas que qualquer host sabe fornecer: nome, tamanho e
+<code>Stream</code>. Mesmo movimento das Fatias 10 e 14 — a fronteira é o controller.
+</p>
+<div class="card tip">
+<strong><code>Stream</code>, não <code>byte[]</code>:</strong> <code>byte[]</code> materializa o
+arquivo inteiro na memória do servidor. 20 autores publicando ao mesmo tempo = 100 MB de heap,
+e o coletor de lixo do .NET manda blocos acima de 85 KB direto pro
+<a href="https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/large-object-heap">Large
+Object Heap</a>, que fragmenta e quase não é compactado. Com <code>Stream</code>, os bytes chegam
+do Kestrel e saem pro Supabase em pedaços — a memória fica constante.
+</div>
+<p>
+E o <code>await using</code>? É o <code>using</code> assíncrono: chama <code>DisposeAsync()</code>
+ao sair do escopo, fechando o stream mesmo se der exceção no meio. Todo <code>Stream</code>
+merece um.
+</p>
+
+<h2>4. O content-type sai da whitelist, não do cliente</h2>
+<pre><code>public static readonly Dictionary&lt;string, string&gt; Tipos = new()
+{
+    [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
+    [".png"] = "image/png",  [".webp"] = "image/webp",
+};</code></pre>
+<p>
+O multipart traz um <code>Content-Type</code> declarado pelo cliente. Ele é
+<strong>ignorado</strong>. O handler deriva o tipo da extensão, que já passou pela whitelist do
+validator. Motivo concreto: o storage devolve o arquivo com o content-type que recebeu — um
+"<code>.png</code>" gravado como <code>text/html</code> vira uma página HTML hospedada no seu
+domínio, executando script no navegador de quem abrir. Isso é XSS, e a defesa é uma linha:
+<em>o tipo vem da nossa tabela</em>.
+</p>
+<p>
+A mesma classe guarda o limite de tamanho, e é ela que o validator, o handler e o atributo do
+controller consultam. Uma whitelist, três consumidores, zero chance de divergirem.
+</p>
+
+<h2>5. <code>ICommand</code> agora, <code>IQuery</code> antes</h2>
+<p>
+Na versão signed URL o caso de uso era <code>IQuery</code> — "não grava no nosso Postgres". Agora é
+<code>ICommand</code>. O critério que ficou:
+</p>
+<pre><code>tem efeito colateral no mundo?  →  ICommand      <span class="cmt">gravar bytes conta</span>
+só responde uma pergunta?       →  IQuery</code></pre>
+<p>
+"Mas o <code>UnitOfWorkBehavior</code> vai commitar o quê?" Nada: <code>SaveChanges</code> sem
+mudanças rastreadas não abre transação, não vai ao banco. O custo é zero e o nome fica honesto —
+quem lê <code>EnviarImagemCommand</code> sabe que algo mudou lá fora.
+</p>
+
+<h2>6. Testar upload sem servidor de arquivos</h2>
+<pre><code>var arquivo = new ByteArrayContent(Encoding.UTF8.GetBytes("bytes-de-imagem"));
+arquivo.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+return new MultipartFormDataContent { { arquivo, "arquivo", nomeArquivo } };
+                                        <span class="cmt">↑ conteúdo  ↑ nome do campo  ↑ nome do arquivo</span></code></pre>
+<p>
+O <code>MultipartFormDataContent</code> monta o corpo exatamente como o navegador. E repare no
+teste novo: ele afirma <code>Assert.Equal("image/png", StorageFake.UltimoContentType)</code> —
+o fake <strong>grava o que recebeu</strong> pra o teste provar que o content-type saiu da
+whitelist e não do multipart. Fake que só devolve valor testa o caminho feliz; fake que
+<em>registra</em> testa a decisão.
+</p>
+
+<h2>7. Quiz rápido (recall, sem espiar)</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> Por que o <code>IFormFile</code> não entra no <code>EnviarImagemCommand</code>?</p>
+<button>Porque record não aceita tipo de interface como parâmetro posicional no construtor</button>
+<button>Porque o MediatR serializa o command no pipeline e o IFormFile não é serializável</button>
+<button>Porque é tipo do ASP.NET: a Application passaria a depender do host pra existir</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> Por que passar <code>Stream</code> em vez de <code>byte[]</code>?</p>
+<button>Pra memória ficar constante: byte[] materializa o arquivo inteiro no heap grande</button>
+<button>Pra o HttpClient poder repetir o envio, já que byte[] só é lido uma vez por request</button>
+<button>Pra o validator medir o tamanho real, já que byte[] não expõe a propriedade Length</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que o content-type vem da whitelist e não do multipart?</p>
+<button>Porque o cliente manda o tipo do disco local e o Supabase recusa tipo desconhecido</button>
+<button>Porque o storage devolve o arquivo com o tipo recebido: um html disfarçado vira XSS</button>
+<button>Porque o dicionário garante o tipo certo mesmo quando a extensão vem em maiúscula</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Pra que serve o <code>[RequestSizeLimit]</code> se o validator já barra 5 MB?</p>
+<button>Ele devolve 413 no lugar de 422, que é o status correto para corpo grande demais</button>
+<button>Ele é o único que vale, porque o validator só roda depois que o handler termina</button>
+<button>Ele corta no servidor antes do corpo inteiro subir; o validator dá a mensagem boa</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>5.</strong> O que se faz com uma decisão de arquitetura que você resolveu trocar?</p>
+<button>Reescreve na tabela com data e motivo, pra decisão antiga não virar mistério depois</button>
+<button>Apaga a linha antiga, porque documentação com decisão morta confunde quem chega</button>
+<button>Mantém as duas ativas, deixando o time escolher a rota conforme o tamanho do arquivo</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/mvc/models/file-uploads">Upload files in
+ASP.NET Core (Microsoft Learn)</a> — leia a seção <em>"Security considerations"</em>; ela é a
+origem das regras das seções 2 e 4. Complemento:
+<a href="https://learn.microsoft.com/en-us/dotnet/api/system.net.http.multipartformdatacontent">MultipartFormDataContent</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0016-criar-post-nn-jsonb.html">Aula 16 — N:N e jsonb</a> ·
+<a href="0014-httpclient-options-signed-url.html">Aula 14 — typed HttpClient + Options</a>
+(o desenho antigo, mantida como registro).
+Próxima: Fatia 18 — editar (slug congelado) e deletar post.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -99,6 +99,14 @@
   Build verde (8 proj, 0 erro), 18 unit tests verdes. **Sem Docker aqui** → integração não rodou.
   Fecha 4 dos 7 itens da issue 05.
 
+- [x] Fatia 17 — Upload multipart pelo backend (aula 0017). **Decisão #14 revisada**: signed URL saiu,
+  `POST /api/v1/imagens` recebe `IFormFile` e repassa ao Supabase. `IFormFile` para no controller →
+  Command leva nome/tamanho/`Stream` (não `byte[]`: LOH). `ImagensPermitidas` = whitelist única
+  (extensão→content-type + 5 MB); **content-type sai dela, não do cliente** (XSS). `IQuery`→`ICommand`
+  (critério agora é efeito colateral, não escrita no Postgres). `GerarUrlUploadQuery` deletado.
+  `ImagensTests` reescrito com `MultipartFormDataContent`; fake agora REGISTRA o content-type recebido.
+  Build verde (8 proj, 0 erro), 18 unit tests verdes. Docs (arquitetura + spec + issue 04) atualizados.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
