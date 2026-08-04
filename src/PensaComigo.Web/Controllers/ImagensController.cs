@@ -3,7 +3,8 @@ using System.Security.Claims;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using PensaComigo.Application.Imagens.UrlUpload;
+using PensaComigo.Application.Imagens;
+using PensaComigo.Application.Imagens.Enviar;
 
 namespace PensaComigo.Web.Controllers;
 
@@ -12,14 +13,21 @@ namespace PensaComigo.Web.Controllers;
 public class ImagensController(ISender mediator) : ControllerBase
 {
     /// <summary>
-    /// Autor pede permissão de upload; o binário sobe direto no Supabase com a URL devolvida
-    /// (Decisão #14 — não passa por aqui). O dono da pasta sai da claim, não do corpo.
+    /// Autor sobe a imagem por aqui (multipart) e recebe o <c>path</c> pra guardar no post
+    /// mais a URL pública pra exibir. O dono da pasta sai da claim, não do corpo.
     /// </summary>
     [Authorize]
-    [HttpPost("url-upload")]
-    public async Task<ActionResult<UrlUploadResponse>> UrlUpload(UrlUploadRequest req, CancellationToken ct)
+    [HttpPost]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(ImagensPermitidas.TamanhoMaximoBytes)]
+    public async Task<ActionResult<ImagemResponse>> Enviar(IFormFile arquivo, CancellationToken ct)
     {
         var usuarioId = Guid.Parse(User.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
-        return Ok(await mediator.Send(new GerarUrlUploadQuery(usuarioId, req.NomeArquivo), ct));
+
+        // O IFormFile (tipo do ASP.NET) para aqui: a Application recebe só nome, tamanho e Stream.
+        await using var conteudo = arquivo.OpenReadStream();
+        var command = new EnviarImagemCommand(usuarioId, arquivo.FileName, arquivo.Length, conteudo);
+
+        return Ok(await mediator.Send(command, ct));
     }
 }
