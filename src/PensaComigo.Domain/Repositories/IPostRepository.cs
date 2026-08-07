@@ -1,3 +1,5 @@
+using Gridify;
+using PensaComigo.Domain.Common;
 using PensaComigo.Domain.Entities;
 
 namespace PensaComigo.Domain.Repositories;
@@ -5,6 +7,15 @@ namespace PensaComigo.Domain.Repositories;
 public interface IPostRepository
 {
     Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Feed paginado/filtrado/ordenado pela querystring (Gridify, Fatia 13).</summary>
+    Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default);
+
+    /// <summary>Post para leitura pública: sem tracking, com Autor e Tags.</summary>
+    Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default);
+
+    /// <summary>Incremento atômico do contador de visualizações.</summary>
+    Task IncrementarVisualizacoesAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Slugs já usados que começam por <paramref name="prefixo"/> — insumo do
     /// <c>GeradorSlug.ResolverColisao</c>. Uma ida ao banco em vez de N.</summary>

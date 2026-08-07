@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 19 — Feed público: Gridify no que importa, rota por slug e incremento atômico</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Feed público: Gridify no que importa, rota por slug e incremento atômico</h1>
+<p class="sub">Aula 19 · Fatia 19 · Ticket 06 — Listar / abrir / visualizações</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> o site tem home. <code>GET /api/v1/posts</code> devolve o feed
+paginado e filtrável, <code>GET /api/v1/posts/{slug}</code> abre a meditação com autor e tags — os
+dois <em>anônimos</em> — e abrir conta visualização sem perder contagem quando dois leitores chegam
+no mesmo instante.
+</div>
+
+<h2>1. <code>[AllowAnonymous]</code> fura o <code>[Authorize]</code> do controller</h2>
+<p>
+Na aula 18 o <code>[Authorize]</code> subiu para a classe inteira, porque tudo ali era escrita.
+Agora entram dois <code>GET</code> públicos no mesmo controller. Não é preciso desmontar nada:
+</p>
+<pre><code>[ApiController]
+[Authorize]                        <span class="cmt">// padrão do controller: exige token</span>
+public class PostsController(ISender mediator) : ControllerBase
+{
+    [AllowAnonymous]               <span class="cmt">// exceção, na ação</span>
+    [HttpGet]
+    public async Task&lt;ActionResult&lt;Pagina&lt;PostResumoResponse&gt;&gt;&gt; Listar(...)</code></pre>
+<p>
+A regra do ASP.NET Core aqui é <strong>assimétrica</strong>, e vale decorar:
+<code>[AllowAnonymous]</code> na ação <em>vence</em> o <code>[Authorize]</code> da classe, mas o
+contrário não acontece — pôr <code>[Authorize]</code> numa ação de um controller
+<code>[AllowAnonymous]</code> não protege nada, porque o filtro de autorização vê o
+<code>AllowAnonymous</code> mais permissivo e desiste. Traduzindo para o dia a dia:
+<em>o padrão seguro fica na classe, e as exceções públicas ficam nas ações</em>. Nunca o inverso.
+</p>
+
+<h2>2. Duas rotas <code>GET</code>, um conflito que não aconteceu</h2>
+<pre><code>[HttpGet]                 <span class="cmt">// /api/v1/posts</span>
+[HttpGet("{slug}")]       <span class="cmt">// /api/v1/posts/respirar-devagar</span>
+[HttpPut("{id:guid}")]    <span class="cmt">// /api/v1/posts/8f2c...  (verbo diferente)</span></code></pre>
+<p>
+<code>{slug}</code> e <code>{id:guid}</code> ocupam a mesma forma de URL. Não colidem por dois
+motivos: o verbo é diferente (<code>GET</code> vs <code>PUT</code>/<code>DELETE</code>) e, mesmo se
+fosse o mesmo, a <strong>constraint</strong> <code>:guid</code> torna aquela rota mais específica —
+o roteador prefere a rota com constraint quando o valor casa, e cai na genérica quando não casa.
+Se um dia existir <code>GET {id:guid}</code> ao lado de <code>GET {slug}</code>, continua
+funcionando; sem a constraint, aí sim seria ambiguidade em tempo de execução.
+</p>
+
+<h2>3. Um <code>GET</code> que escreve: por que <code>ICommand</code></h2>
+<p>
+Abrir o post incrementa <code>qtd_visualizacoes</code>. Isso é um <em>efeito colateral</em> — e o
+critério que a Fatia 17 firmou é justamente esse, não "escreve no Postgres". Então:
+</p>
+<pre><code>public record AbrirPostCommand(string Slug) : ICommand&lt;PostDetalheResponse&gt;;</code></pre>
+<p>
+Estranha o nome <code>Command</code> atrás de um <code>HttpGet</code>? É o ponto: <strong>verbo HTTP
+e marcador CQRS descrevem coisas diferentes</strong>. O verbo é contrato com o cliente (é
+cacheável? o browser pode repetir?); o marcador diz ao <code>UnitOfWorkBehavior</code> se ele
+commita no fim do pipeline. Um <code>GET</code> com efeito colateral é uma decisão de produto
+comum — todo site de conteúdo conta view no GET — e o pipeline precisa saber disso.
+</p>
+<p class="card">
+<strong>Consequência prática:</strong> esse <code>GET</code> não é idempotente, então nunca
+coloque cache HTTP agressivo nem <em>retry</em> automático em cima dele sem pensar — cada repetição
+vira uma view a mais.
+</p>
+
+<h2>4. <code>ExecuteUpdateAsync</code>: o incremento que não perde contagem</h2>
+<p>
+O caminho óbvio seria carregar o post rastreado e fazer <code>post.QtdVisualizacoes++</code>. Ele
+funciona com um leitor e mente com dois. Dois requests simultâneos leem <code>10</code>, ambos
+calculam <code>11</code>, ambos gravam <code>11</code>: uma view sumiu. É o <em>lost update</em>
+clássico — o cálculo aconteceu <strong>na sua memória</strong>, com um valor que já estava velho
+quando chegou lá.
+</p>
+<pre><code>public Task IncrementarVisualizacoesAsync(Guid id, CancellationToken ct = default) =&gt;
+    db.Posts.Where(p =&gt; p.Id == id)
+            .ExecuteUpdateAsync(s =&gt; s.SetProperty(
+                p =&gt; p.QtdVisualizacoes,
+                p =&gt; p.QtdVisualizacoes + 1), ct);</code></pre>
+<p>
+Isso vira <code>UPDATE posts SET qtd_visualizacoes = qtd_visualizacoes + 1 WHERE id = …</code>. A
+soma acontece <strong>dentro do banco</strong>, sob o lock da linha: dois requests simultâneos viram
+<code>12</code>, sempre. Repare no segundo <code>SetProperty</code>: ele recebe uma
+<em>lambda sobre a entidade</em>, não um valor — é isso que gera <code>coluna = coluna + 1</code> em
+vez de <code>coluna = 11</code>.
+</p>
+<p>
+Duas coisas específicas de <code>ExecuteUpdate</code> que vão te morder algum dia: ele
+<strong>não passa pelo change tracker</strong> (o objeto que você tem em memória continua com o
+valor antigo — por isso o handler devolve <code>post.QtdVisualizacoes + 1</code>) e ele
+<strong>executa na hora</strong>, não no <code>SaveChanges</code>. Aqui isso é indiferente; num
+handler onde o UPDATE precisasse ser atômico junto de outras gravações, seria preciso uma transação
+explícita.
+</p>
+
+<h2>5. Listar é outro <em>shape</em>, não o mesmo post menor</h2>
+<pre><code>public record PostResumoResponse(Guid Id, string Titulo, string Slug, string ImagemCapa,
+    int TempoLeitura, int QtdCurtidas, int QtdVisualizacoes, DateTime DataCriacao);</code></pre>
+<p>
+Sem <code>Conteudo</code>, sem autor, sem tags. Vinte posts por página arrastando o jsonb inteiro do
+corpo seria um payload de megabytes para desenhar cards. O detalhe, esse sim, carrega tudo — e é aí
+que entra <code>Include(p =&gt; p.Autor).Include(p =&gt; p.Tags)</code>, com
+<code>AsNoTracking()</code> porque ninguém vai mutar aquilo (é leitura pura; contraste com o
+<code>ObterParaEdicaoAsync</code> da aula 18).
+</p>
+
+<h2>6. O mapper do Gridify, agora com coleção</h2>
+<pre><code>private static readonly IGridifyMapper&lt;Post&gt; Mapper = new GridifyMapper&lt;Post&gt;()
+    .AddMap("titulo", p =&gt; p.Titulo)
+    .AddMap("autor",  p =&gt; p.Autor.Nome)
+    .AddMap("tag",    p =&gt; p.Tags.Select(t =&gt; t.Slug))   <span class="cmt">// N:N → EXISTS</span>
+    .AddMap("dataCriacao", p =&gt; p.DataCriacao);
+
+if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataCriacao desc";</code></pre>
+<p>
+O mapa <code>tag</code> aponta para uma <em>coleção</em>: o Gridify entende e o EF traduz
+<code>?filter=tag=saude-mental</code> num <code>EXISTS</code> sobre a junção — filtro por tema de
+graça, sem endpoint novo. E o mapper continua sendo uma <strong>whitelist</strong>: o que não está
+ali não é filtrável, por mais que o cliente peça. Sem isso, a querystring viraria uma superfície de
+ataque sobre colunas que você nunca quis expor.
+</p>
+<p>
+O <code>OrderBy</code> padrão é <code>dataCriacao desc</code> — feed é cronológico invertido. Mas o
+motivo mais duro é o da aula 13: <strong>sem <code>ORDER BY</code> o Postgres não promete a mesma
+ordem duas vezes</strong>, e a página 2 pode repetir ou pular itens que a página 1 já mostrou.
+</p>
+
+<h2>Quiz</h2>
+
+<div class="q" data-a="0">
+<p><strong>1.</strong> Onde deve ficar o <code>[Authorize]</code> num controller com ações públicas e privadas?</p>
+<button>Na classe, e as ações públicas abrem exceção com AllowAnonymous, que vence o padrão</button>
+<button>Nas ações privadas, e a classe recebe AllowAnonymous para liberar as leituras do feed</button>
+<button>Nos dois lugares ao mesmo tempo, porque o filtro exige o atributo no nível da ação</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>post.QtdVisualizacoes++</code> num objeto rastreado é pior que <code>ExecuteUpdateAsync</code>?</p>
+<button>Porque o change tracker ignora propriedades numéricas e não gera UPDATE para elas</button>
+<button>Porque o EF Core recusa gravar coluna com valor default declarado na configuration</button>
+<button>Porque a soma acontece na memória sobre um valor velho e dois leitores perdem uma view</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que abrir um post é <code>ICommand</code> se a rota é um <code>GET</code>?</p>
+<button>Porque toda rota que devolve entidade completa precisa commitar a transação no fim</button>
+<button>Porque o marcador CQRS descreve efeito colateral, e o verbo HTTP é outro contrato</button>
+<button>Porque queries do MediatR não conseguem receber parâmetro vindo do trecho da rota</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> O que o mapa <code>.AddMap("tag", p =&gt; p.Tags.Select(t =&gt; t.Slug))</code> permite?</p>
+<button>Ordenar o feed pela quantidade de tags que cada post tem vinculada na junção</button>
+<button>Devolver as tags dentro de cada card do feed sem precisar de Include na consulta</button>
+<button>Filtrar o feed por tema, virando um EXISTS sobre a tabela de junção no Postgres</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>5.</strong> Por que o repositório força um <code>OrderBy</code> padrão na listagem?</p>
+<button>Porque sem ordem explícita o banco não repete a sequência e a paginação fica instável</button>
+<button>Porque o Gridify lança exceção em tempo de execução quando a querystring vem sem ordem</button>
+<button>Porque o envelope de página calcula o total de itens a partir da coluna de ordenação</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete">ExecuteUpdate
+and ExecuteDelete (Microsoft Learn)</a> — inclui a seção sobre o que <em>não</em> passa pelo change
+tracker. Complementos:
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/simple">Simple
+authorization (AllowAnonymous vs Authorize)</a> e
+<a href="https://alirezanet.github.io/Gridify/guide/gridifyMapper">GridifyMapper</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0018-editar-deletar-change-tracker.html">Aula 18 — editar e deletar</a> ·
+<a href="0013-gridify-listagem-paginada.html">Aula 13 — Gridify</a>.
+Próxima: Ticket 07 — comentários (rate limit, moderação, 1 nível de resposta).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
