@@ -341,7 +341,7 @@ API RESTful versionada (`/api/v1`), com controllers magros que apenas orquestram
 | 11 | Login: frontend faz Google, backend valida e emite JWT próprio | Padrão SPA + API; backend não redireciona nem guarda sessão |
 | 12 | Só seed é admin; login externo recusado; `is_admin` default `false` | Leitor não precisa de conta; evita admin acidental |
 | 13 | Slug gerado do título na criação e **congelado**; sufixo `-N` na colisão | Link estável mesmo se o título for editado |
-| 14 | Upload de imagem via **signed URL** (frontend sobe direto no Supabase) | Binário não passa pelo .NET |
+| 14 | ~~Upload via signed URL~~ → **upload pelo backend** (`POST /api/v1/imagens`, multipart): o .NET recebe o arquivo, valida e repassa ao Supabase Storage, devolvendo `{ path, url }` | Revisada em 2026-08-03. Um passo pro cliente em vez de dois; validação real (tamanho, extensão, content-type) antes de qualquer byte chegar ao bucket; a chave do Supabase e o fornecedor ficam escondidos atrás da nossa API. Custo aceito: o binário atravessa o .NET (5 MB, `Stream`, sem buffer em `byte[]`) |
 | 15 | Moderação de comentário automática: rate limit 5/min + filtro de palavrão que **bloqueia** | Estilo YouTube, sem gargalo de aprovação manual |
 | 16 | Erros de domínio via **exceções** + `ExceptionHandlingMiddleware` | Reusa o middleware do FluentValidation; controllers magros |
 | 17 | Testes de integração com **Testcontainers** (Postgres real) | Valida `jsonb` e constraints reais; InMemory testaria ficção |
@@ -362,7 +362,7 @@ API RESTful versionada (`/api/v1`), com controllers magros que apenas orquestram
 Todos os pontos anteriormente em aberto foram resolvidos no grilling de arquitetura (ver Decisões #9–18):
 
 - ~~Incremento de visualizações~~ → cru, sem proteção (Decisão #7/entidade); upgrade marcado com `ponytail:`.
-- ~~Upload Supabase Storage~~ → signed URL, frontend sobe direto (Decisão #14).
+- ~~Upload Supabase Storage~~ → multipart pelo backend, que repassa ao Storage (Decisão #14, revisada).
 - ~~Modelo de blocos + mapeamento jsonb~~ → flat + conversor manual, sem GIN (Decisão #10).
 - ~~Geração de slug~~ → do título na criação, congelado, sufixo `-N` (Decisão #13).
 

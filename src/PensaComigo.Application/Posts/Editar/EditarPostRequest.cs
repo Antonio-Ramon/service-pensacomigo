@@ -1,0 +1,14 @@
+using PensaComigo.Domain.ValueObjects;
+
+namespace PensaComigo.Application.Posts.Editar;
+
+/// <summary>
+/// Corpo do PUT. Sem <c>Id</c> (vem da rota), sem <c>AutorId</c> (vem da claim `sub`)
+/// e sem <c>Slug</c>: o slug congela na criação — quem manda o slug renomeia a URL
+/// de um post já compartilhado.
+/// </summary>
+public record EditarPostRequest(
+    string Titulo,
+    string ImagemCapa,
+    List<Guid> TagIds,
+    List<Bloco> Conteudo);

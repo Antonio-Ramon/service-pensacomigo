@@ -90,6 +90,34 @@
   todos verdes** (primeiro teste que ROda nesta máquina — não precisa de Docker). Build verde
   (8 proj, 0 erro). Fecha 2 dos 7 itens da issue 05.
 
+- [x] Fatia 16 — `CriarPostCommand`: N:N + jsonb (aula 0016). `CriarPostRequest` (corpo) separado do
+  Command (`AutorId` da claim). Handler = impureim sandwich: `ListarSlugsComPrefixoAsync` (LIKE
+  prefixo%) → `ResolverColisao` puro → `ObterPorIdsAsync` (**único método de repo SEM AsNoTracking**:
+  entidade rastreada faz o EF inserir só `post_tags`, sem reinserir a tag) → `Calcular` tempo →
+  `AdicionarAsync`. Validator com `RuleForEach` + switch expression cobrindo o modelo flat do Bloco.
+  Tag inexistente → 404 via `Except()`. `PostsTests` (401 / jsonb+junção+colisão `-2` / 422).
+  Build verde (8 proj, 0 erro), 18 unit tests verdes. **Sem Docker aqui** → integração não rodou.
+  Fecha 4 dos 7 itens da issue 05.
+
+- [x] Fatia 17 — Upload multipart pelo backend (aula 0017). **Decisão #14 revisada**: signed URL saiu,
+  `POST /api/v1/imagens` recebe `IFormFile` e repassa ao Supabase. `IFormFile` para no controller →
+  Command leva nome/tamanho/`Stream` (não `byte[]`: LOH). `ImagensPermitidas` = whitelist única
+  (extensão→content-type + 5 MB); **content-type sai dela, não do cliente** (XSS). `IQuery`→`ICommand`
+  (critério agora é efeito colateral, não escrita no Postgres). `GerarUrlUploadQuery` deletado.
+  `ImagensTests` reescrito com `MultipartFormDataContent`; fake agora REGISTRA o content-type recebido.
+  Build verde (8 proj, 0 erro), 18 unit tests verdes. Docs (arquitetura + spec + issue 04) atualizados.
+
+- [x] Fatia 18 — Editar + deletar post (aula 0018). `EditarPostCommand`/`DeletarPostCommand`,
+  `PUT`/`DELETE {id:guid}`, `[Authorize]` subiu para o controller inteiro. Edição carrega
+  RASTREADO com `Include(Tags)` (`ObterParaEdicaoAsync`) — sem Include as tags antigas nunca
+  saem da junção; `post.Tags = vinculadas` gera o delta. Slug congelado **por omissão** (sem
+  campo no request, sem escrita no handler). Não-dono → **404** (403 vazaria existência),
+  checado no handler, não no atributo. Regras de validação extraídas p/ `PostEscritaValidator<T>`
+  genérico sobre `IPostEscrita` (record implementa a interface de graça; scanner só acha as
+  subclasses fechadas). Delete físico + cascata do schema; `ICommand<Unit>` → 204. Build verde
+  (8 proj, 0 erro), 18 unit tests verdes. 3 testes de integração novos **sem Docker aqui**.
+  **Ticket 05 fechado.**
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
