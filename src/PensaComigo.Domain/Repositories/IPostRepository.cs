@@ -20,6 +20,10 @@ public interface IPostRepository
     /// <summary>Incremento atômico do contador de visualizações.</summary>
     Task IncrementarVisualizacoesAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Soma <paramref name="delta"/> (+1 ao curtir, -1 ao descurtir) no contador
+    /// desnormalizado, de forma atômica e sem deixá-lo ficar negativo.</summary>
+    Task AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default);
+
     /// <summary>Slugs já usados que começam por <paramref name="prefixo"/> — insumo do
     /// <c>GeradorSlug.ResolverColisao</c>. Uma ida ao banco em vez de N.</summary>
     Task<IReadOnlyList<string>> ListarSlugsComPrefixoAsync(string prefixo, CancellationToken ct = default);

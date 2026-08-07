@@ -45,6 +45,12 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         db.Posts.Where(p => p.Id == id)
                 .ExecuteUpdateAsync(s => s.SetProperty(p => p.QtdVisualizacoes, p => p.QtdVisualizacoes + 1), ct);
 
+    // Mesma ideia do contador de visualizações, agora nos dois sentidos. O `>= 0` no Where é
+    // guarda no BANCO: descurtir a mais não casa nenhuma linha em vez de deixar o contador negativo.
+    public Task AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default) =>
+        db.Posts.Where(p => p.Id == id && p.QtdCurtidas + delta >= 0)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.QtdCurtidas, p => p.QtdCurtidas + delta), ct);
+
     // StartsWith vira `LIKE 'prefixo%'` no Postgres — pega "meditar" e "meditar-2" de uma vez.
     public async Task<IReadOnlyList<string>> ListarSlugsComPrefixoAsync(string prefixo, CancellationToken ct = default) =>
         await db.Posts.AsNoTracking()
