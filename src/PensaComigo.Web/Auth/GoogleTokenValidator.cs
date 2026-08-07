@@ -25,8 +25,7 @@ public class GoogleTokenValidator(IConfiguration config) : IGoogleTokenValidator
         }
         catch (InvalidJwtException)
         {
-            // ponytail: reusa 422 (não há tipo p/ 401 ainda); token forjado/expirado cai aqui.
-            throw new RegraDeNegocioException("Token do Google inválido ou expirado.");
+            throw new NaoAutorizadoException("Token do Google inválido ou expirado.");
         }
 
         return new GoogleUserInfo(payload.Email, payload.Subject, payload.Picture);

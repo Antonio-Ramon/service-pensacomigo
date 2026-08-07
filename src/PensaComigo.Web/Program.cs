@@ -3,6 +3,7 @@ using System.Text;
 using Gridify;
 using Gridify.EntityFramework;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
@@ -10,6 +11,7 @@ using PensaComigo.Application;
 using PensaComigo.Application.Auth;
 using PensaComigo.Application.Storage;
 using PensaComigo.Persistence;
+using PensaComigo.Shared.Erros;
 using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
 using PensaComigo.Web.Storage;
@@ -22,7 +24,35 @@ GridifyGlobalConfiguration.IgnoreNotMappedFields = true;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+// O MVC transforma propriedade não-anulável em [Required] implícito e rejeita o corpo ANTES do
+// pipeline — com mensagem em inglês e num formato só dele. Desligado: quem valida corpo é o
+// FluentValidation, num lugar só, em pt-br (ValidationBehavior → 422).
+builder.Services.AddControllers(mvc =>
+{
+    mvc.SuppressImplicitRequiredAttributeForNonNullableReferenceTypes = true;
+})
+.ConfigureApiBehaviorOptions(mvc =>
+{
+    // Sobra o que o binder não consegue nem ler: JSON quebrado, corpo vazio, guid inválido
+    // na rota. Continua 400 (não entendi o pedido) — mas no MESMO envelope de erro do
+    // GlobalExceptionHandler, senão o front trataria dois formatos.
+    mvc.InvalidModelStateResponseFactory = ctx =>
+    {
+        var resposta = new RespostaErro
+        {
+            Message = "Não foi possível ler a requisição. Confira o formato dos campos.",
+            Notifications =
+            [
+                .. ctx.ModelState
+                     .Where(campo => campo.Value?.Errors.Count > 0)
+                     .SelectMany(campo => campo.Value!.Errors
+                         .Select(e => new Notificacao(campo.Key, e.ErrorMessage))),
+            ],
+        };
+
+        return new ObjectResult(resposta) { StatusCode = StatusCodes.Status400BadRequest };
+    };
+});
 builder.Services.AddApplication();
 builder.Services.AddPersistence(builder.Configuration);
 
@@ -69,6 +99,23 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer = jwt["Issuer"],
             ValidAudience = jwt["Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"] ?? "")),
+        };
+
+        // Token ausente/inválido é rejeitado pelo middleware, longe do GlobalExceptionHandler —
+        // e o padrão é 401 com corpo VAZIO. Aqui ele passa a falar o mesmo envelope dos demais.
+        options.Events = new JwtBearerEvents
+        {
+            OnChallenge = async contexto =>
+            {
+                contexto.HandleResponse();   // cancela a resposta padrão do handler
+                contexto.Response.StatusCode = StatusCodes.Status401Unauthorized;
+
+                await contexto.Response.WriteAsJsonAsync(new RespostaErro
+                {
+                    Message = "Autenticação necessária. Envie um token válido.",
+                    Notifications = [new Notificacao("Erro", "Token ausente, inválido ou expirado.")],
+                });
+            },
         };
     });
 builder.Services.AddAuthorization();
