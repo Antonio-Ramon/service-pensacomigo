@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 18 — Editar e deletar: change tracker, dono do recurso e validator genérico</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Editar e deletar: change tracker, dono do recurso e validator genérico</h1>
+<p class="sub">Aula 18 · Fatia 18 · Ticket 05 — Post (fecha o ticket)</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> o ticket 05 fechou. <code>PUT</code> e <code>DELETE</code> no
+ar, slug congelado de verdade, e ninguém edita post dos outros. Você escreveu o primeiro handler
+que <em>não</em> constrói entidade — só muda propriedade e deixa o EF descobrir o resto.
+</div>
+
+<h2>1. Criar constrói; editar muta</h2>
+<p>
+Vindo de outra linguagem, a tentação é montar um <code>new Post { ... }</code> com os campos novos e
+mandar salvar. Em EF Core isso é o caminho errado: você criaria um segundo objeto e o banco
+ganharia uma segunda linha. O jeito é o oposto — <strong>carregar rastreado e mexer no objeto</strong>:
+</p>
+<pre><code>var post = await posts.ObterParaEdicaoAsync(cmd.Id, ct);   <span class="cmt">sem AsNoTracking</span>
+
+post.Titulo = cmd.Titulo.Trim();
+post.TempoLeitura = CalculadoraTempoLeitura.Calcular(cmd.Conteudo);
+<span class="cmt">// não há Update(), não há SaveChanges() aqui</span></code></pre>
+<p>
+Não tem <code>posts.Atualizar(post)</code> porque não precisa. O <em>change tracker</em> (aula 16)
+guardou uma foto do objeto no momento em que ele saiu do banco; no <code>SaveChanges</code> —
+que quem chama é o <code>UnitOfWorkBehavior</code>, no fim do pipeline — ele compara foto e objeto e
+emite um <code>UPDATE</code> só com as colunas que mudaram. É por isso que
+<code>ObterParaEdicaoAsync</code> é o <strong>segundo</strong> método do repositório sem
+<code>AsNoTracking</code>: sem rastreio não há foto, e sem foto não há diff.
+</p>
+
+<h2>2. A coleção N:N: trocar a lista inteira</h2>
+<pre><code>public Task&lt;Post?&gt; ObterParaEdicaoAsync(Guid id, CancellationToken ct = default) =&gt;
+    db.Posts.Include(p =&gt; p.Tags).FirstOrDefaultAsync(p =&gt; p.Id == id, ct);
+
+<span class="cmt">// no handler:</span>
+post.Tags = vinculadas;</code></pre>
+<p>
+Uma linha, e o EF emite o <code>DELETE</code> das tags que saíram e o <code>INSERT</code> das que
+entraram em <code>post_tags</code> — nada mais. Mas isso só funciona por causa do
+<code>Include(p =&gt; p.Tags)</code>: <strong>o EF só sabe remover o que ele carregou</strong>. Sem o
+<code>Include</code>, a coleção original chega vazia, o diff vira "só inserções" e as tags antigas
+ficam grudadas no post para sempre. Esse é o bug clássico de edição N:N.
+</p>
+
+<h2>3. Slug congelado: a regra que se cumpre por omissão</h2>
+<p>
+O <code>EditarPostCommand</code> aceita título novo — e o handler <strong>não toca no
+<code>post.Slug</code></strong>. Nenhum <code>if</code>, nenhuma validação: a regra "o slug nasce do
+título e congela" virou uma linha que simplesmente não existe. Note também que o
+<code>EditarPostRequest</code> não tem campo <code>Slug</code>; se tivesse, um cliente conseguiria
+renomear a URL de um post já compartilhado por aí. <em>Campo que não existe no DTO é a validação
+mais barata que há.</em>
+</p>
+
+<h2>4. Dono do recurso: por que 404 e não 403</h2>
+<pre><code>if (post is null || post.AutorId != cmd.AutorId)
+    throw new NaoEncontradoException("Post", cmd.Id.ToString());</code></pre>
+<p>
+As duas condições caem na <em>mesma</em> exceção de propósito. Um <code>403 Forbidden</code> seria
+tecnicamente mais preciso — mas ele responde "esse post existe, só não é seu", e com isso qualquer
+um enumera Ids até mapear o acervo alheio. O <code>404</code> não distingue "não existe" de "não é
+seu", e é exatamente essa a intenção. Repare onde a checagem mora: no <strong>handler</strong>, não
+no <code>[Authorize]</code>. O atributo responde "quem é você?"; "isso é seu?" é regra de negócio, e
+regra de negócio fica na Application.
+</p>
+
+<h2>5. O validator genérico</h2>
+<p>
+Criar e editar cobram exatamente as mesmas regras de corpo (título, capa, blocos coerentes). Em vez
+de duplicar as quatro regras, uma interface descreve o formato e o validator fica genérico nela:
+</p>
+<pre><code>public interface IPostEscrita
+{
+    string Titulo { get; }  string ImagemCapa { get; }  List&lt;Bloco&gt; Conteudo { get; }
+}
+
+public abstract class PostEscritaValidator&lt;T&gt; : AbstractValidator&lt;T&gt; where T : IPostEscrita { ... }
+
+public class CriarPostCommandValidator  : PostEscritaValidator&lt;CriarPostCommand&gt;;
+public class EditarPostCommandValidator : PostEscritaValidator&lt;EditarPostCommand&gt;;</code></pre>
+<p>
+Duas coisas específicas de C#/.NET aqui. Primeira: <code>record</code> implementa interface de
+propriedades <em>de graça</em> — os parâmetros posicionais já geram as <code>get</code> exigidas,
+sem escrever nada. Segunda: o <code>AddValidatorsFromAssembly</code> varre o assembly procurando
+classes concretas; ele <strong>ignora a genérica aberta</strong> <code>PostEscritaValidator&lt;T&gt;</code>
+(abstrata) e acha as duas fechadas. Por isso as subclasses de uma linha precisam existir — elas
+são o que o scanner consegue instanciar.
+</p>
+
+<h2>6. Deletar: o banco faz o trabalho</h2>
+<pre><code>posts.Remover(post);   <span class="cmt">→ db.Posts.Remove(post)</span></code></pre>
+<p>
+Nenhuma linha apaga comentários, likes ou <code>post_tags</code>. O schema já declarou
+<code>OnDelete(DeleteBehavior.Cascade)</code> nessas FKs, então o Postgres derruba os filhos junto.
+A <em>tag</em> sobrevive — a cascata segue a junção, não o outro lado do N:N (senão deletar um post
+apagaria a tag "Meditação" do site inteiro). O teste de integração afirma exatamente isso.
+</p>
+<p>
+E o verbo devolve <code>204 No Content</code>, não <code>200</code> com corpo: não há o que
+devolver. No MediatR, "sem resposta" ainda precisa de um tipo — daí o
+<code>ICommand&lt;Unit&gt;</code>, com <code>Unit</code> fazendo o papel de <code>void</code>.
+</p>
+
+<h2>Quiz</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que o handler de edição não chama nenhum método "Atualizar" do repositório?</p>
+<button>Porque o UnitOfWorkBehavior reexecuta o handler inteiro e grava o objeto novo por cima</button>
+<button>Porque o change tracker compara o objeto com a foto do carregamento e monta o UPDATE</button>
+<button>Porque o EF Core grava qualquer objeto passado ao handler quando o request termina bem</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> O que quebra se o <code>Include(p =&gt; p.Tags)</code> sumir da consulta de edição?</p>
+<button>A consulta falha em tempo de execução, porque a coleção fica nula em vez de vazia</button>
+<button>O post grava normalmente, mas as tags voltam duplicadas na tabela de junção salva</button>
+<button>As tags antigas nunca saem: sem coleção carregada, o diff só enxerga as inserções</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que responder 404 quando quem edita não é o autor do post?</p>
+<button>Porque 403 confirmaria a existência do post e deixaria enumerar Ids alheios do banco</button>
+<button>Porque 403 exige um cabeçalho de desafio que a API não emite no fluxo de JWT usado</button>
+<button>Porque 403 só se aplica quando falta a claim, e nesse caso a claim veio no token certo</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que as subclasses de uma linha do validator precisam existir?</p>
+<button>Porque a classe genérica não consegue ler as propriedades declaradas pela interface</button>
+<button>Porque cada command exige mensagens de erro próprias com o nome do caso de uso nelas</button>
+<button>Porque o scanner do assembly instancia classes concretas e pula a genérica aberta</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>5.</strong> Como a regra "o slug congela na criação" é cumprida no código de edição?</p>
+<button>Um validator recusa o pedido sempre que o slug enviado difere do slug já gravado</button>
+<button>Não há campo de slug no request e o handler não escreve nessa propriedade nunca</button>
+<button>O repositório devolve o post sem rastrear a coluna slug, então o UPDATE a ignora</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/saving/related-data">Saving related data +
+change tracking (Microsoft Learn)</a> — a seção sobre coleções e <em>skip navigations</em> explica
+o diff da junção da seção 2. Complemento:
+<a href="https://learn.microsoft.com/en-us/ef/core/change-tracking/">Change Tracking in EF Core</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0017-upload-multipart-stream.html">Aula 17 — upload multipart</a> ·
+<a href="0016-criar-post-nn-jsonb.html">Aula 16 — N:N e jsonb</a>.
+Próxima: Ticket 06 — listar posts e abrir por slug (Gridify + contador de visualizações).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -9,9 +9,9 @@
 - [x] Criar post: título, capa (path), tags (N:N via `Post.Tags`), conteúdo `List<Bloco>` (texto/imagem/link, flat, com ordem)
 - [x] `GeradorSlug` ~~no Shared~~ **em `Application/Common`**: normaliza (sem acento/pontuação, minúsculo, espaço→`-`), colisão resolve com sufixo `-N` [unit] — *Shared referencia Application, então a Application não enxergaria de volta*
 - [x] `CalculadoraTempoLeitura` em `Application/Common` [unit] — plugada no `CriarPostCommandHandler`
-- [ ] Editar post (título, capa, tags, conteúdo) — slug permanece fixo
-- [ ] Deletar post
-- [ ] Escrita/edição/delete exigem JWT
-- [ ] Teste de integração: cria post e valida jsonb + slug congelado + colisão de slug contra Postgres real
+- [x] Editar post (título, capa, tags, conteúdo) — slug permanece fixo
+- [x] Deletar post (cascata leva comentários/likes/junção; a tag sobrevive)
+- [x] Escrita/edição/delete exigem JWT — `[Authorize]` no controller; não-autor recebe **404** (não 403: 403 confirma que o post existe)
+- [x] Teste de integração: cria post e valida jsonb + slug congelado + colisão de slug contra Postgres real — *escrito, não executado aqui (sem Docker nesta máquina)*
 
 > Gridify (Decisão #19 / arquitetura §7.1): **não se aplica** — este ticket é criar/editar/deletar; a listagem de posts (com Gridify) é a issue 06.
