@@ -50,6 +50,7 @@ public sealed class GlobalExceptionHandler(
         NaoAutorizadoException => (StatusCodes.Status401Unauthorized, ex.Message),
         NaoEncontradoException => (StatusCodes.Status404NotFound, ex.Message),
         RegraDeNegocioException => (StatusCodes.Status422UnprocessableEntity, ex.Message),
+        MuitasRequisicoesException => (StatusCodes.Status429TooManyRequests, ex.Message),
 
         ValidationException falhas when falhas.Errors.Any() =>
             (StatusCodes.Status422UnprocessableEntity,
@@ -73,7 +74,8 @@ public sealed class GlobalExceptionHandler(
                 JsonNamingPolicy.CamelCase.ConvertName(e.PropertyName), e.ErrorMessage))],
 
         // Erro sem campo culpado: uma notificação com a origem, igual ao escolaweb.
-        NaoAutorizadoException or NaoEncontradoException or RegraDeNegocioException =>
+        NaoAutorizadoException or NaoEncontradoException or RegraDeNegocioException
+            or MuitasRequisicoesException =>
             [new Notificacao("Erro", ex.Message)],
 
         DbUpdateException => [new Notificacao("Erro", "Registro em uso ou duplicado.")],
