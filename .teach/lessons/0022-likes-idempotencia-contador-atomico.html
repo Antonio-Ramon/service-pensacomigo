@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 22 — Idempotência, unicidade no banco e contador atômico</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Idempotência, unicidade no banco e contador atômico</h1>
+<p class="sub">Aula 22 · Fatia 22 · Ticket 08 — Likes anônimos</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> qualquer leitor curte um post em
+<code>POST /api/v1/posts/{postId}/curtidas</code> e descurte com <code>DELETE</code> na mesma rota.
+Clicar cinco vezes deixa o contador em <strong>1</strong>. Não porque o front bloqueia o botão —
+porque o <em>banco</em> não deixa a segunda linha existir.
+</div>
+
+<h2>1. Idempotência: a mesma requisição, o mesmo resultado</h2>
+<p>
+Uma operação é <strong>idempotente</strong> quando repeti-la não muda nada além da primeira vez.
+<code>DELETE /curtidas</code> de quem nunca curtiu não é erro — o estado final desejado
+("este visitante não curte este post") já vale. Devolver 404 ali obrigaria o front a saber de
+antemão se curtiu, e a rede é imprevisível: o cliente pode ter recebido a resposta e perdido,
+e vai reenviar.
+</p>
+<p>
+No nosso código isso aparece como dois <code>return</code> silenciosos:
+</p>
+<pre><code><span class="cmt">// curtir</span>
+if (await likes.ExisteAsync(cmd.PostId, cmd.Visitante, ct))
+    return Unit.Value;          <span class="cmt">// já curtiu: 204, sem contar de novo</span>
+
+<span class="cmt">// descurtir</span>
+var like = await likes.ObterAsync(cmd.PostId, cmd.Visitante, ct);
+if (like is null) return Unit.Value;   <span class="cmt">// não curtia: 204, nada a fazer</span></code></pre>
+<p>
+Note que os dois devolvem <strong>204</strong>, o mesmo da chamada que fez efeito. O cliente não
+precisa distinguir; ele só quer saber que acabou naquele estado.
+<a href="https://developer.mozilla.org/en-US/docs/Glossary/Idempotent">Definição no MDN</a> —
+por spec, <code>PUT</code> e <code>DELETE</code> são idempotentes, <code>POST</code> não é
+obrigado a ser. O nosso é, de propósito.
+</p>
+
+<h2>2. <code>if</code> não garante unicidade. Constraint garante.</h2>
+<p>
+Aquele <code>ExisteAsync</code> é <strong>check-then-act</strong>: você lê, decide, escreve. Entre
+o ler e o escrever cabe outra requisição inteira. Dois cliques simultâneos do mesmo visitante:
+</p>
+<pre><code>req A: SELECT ... → não existe
+req B: SELECT ... → não existe     <span class="cmt">← A ainda não gravou</span>
+req A: INSERT like
+req B: INSERT like                 <span class="cmt">← duas linhas, contador em 2</span></code></pre>
+<p>
+Nenhum <code>if</code> em C# fecha essa janela, porque a janela existe <em>entre</em> duas idas ao
+banco. Quem fecha é o índice único que já estava no schema desde a Fatia 1:
+</p>
+<pre><code>builder.HasIndex(l =&gt; new { l.PostId, l.ViewerHash }).IsUnique();</code></pre>
+<p>
+O segundo <code>INSERT</code> estoura <code>DbUpdateException</code>, que o
+<a href="0006-exception-handling.html">GlobalExceptionHandler da Fatia 6</a> já traduz para
+<strong>409</strong>. Ou seja: o <code>if</code> é <em>conveniência</em> (transforma o caso comum
+num 204 limpo), a constraint é <em>garantia</em>. Só a segunda é verdade sob concorrência.
+</p>
+<div class="card">
+<strong>Regra geral:</strong> toda vez que você escrever "primeiro eu verifico se já existe",
+pergunte quem impede que dois processos verifiquem ao mesmo tempo. Se a resposta não for
+"uma constraint" ou "um lock", você tem um bug raro — desses que só aparecem em produção,
+no dia de maior tráfego.
+</div>
+
+<h2>3. Contador desnormalizado: <code>coluna = coluna + 1</code>, nunca ler-somar-gravar</h2>
+<p>
+<code>qtd_curtidas</code> vive no post para a listagem não fazer um <code>COUNT</code> por card.
+Mantê-lo é o mesmo problema da Fatia 19, agora nos dois sentidos:
+</p>
+<pre><code>public Task AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default) =&gt;
+    db.Posts.Where(p =&gt; p.Id == id &amp;&amp; p.QtdCurtidas + delta &gt;= 0)
+            .ExecuteUpdateAsync(s =&gt; s.SetProperty(p =&gt; p.QtdCurtidas, p =&gt; p.QtdCurtidas + delta), ct);</code></pre>
+<p>
+Se em vez disso você carregasse o post e fizesse <code>post.QtdCurtidas++</code>, dois visitantes
+simultâneos leriam 5, ambos gravariam 6, e uma curtida sumiria — <em>lost update</em>. Com
+<code>ExecuteUpdateAsync</code> quem soma é o Postgres, dentro de uma única instrução, sob o lock
+da linha. <a href="https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete">Docs
+do ExecuteUpdate</a>.
+</p>
+<p>
+O <code>&amp;&amp; p.QtdCurtidas + delta &gt;= 0</code> no <code>Where</code> é o cinto de segurança:
+um descurtir a mais nunca deixa o contador negativo — a linha simplesmente não casa e o
+<code>UPDATE</code> afeta zero linhas. Guarda no banco, não <code>if</code> no C#.
+</p>
+
+<h2>4. O preço: <code>ExecuteUpdate</code> não entra no Unit of Work</h2>
+<p>
+Aqui está a parte que quase ninguém conta. <code>ExecuteUpdateAsync</code> <strong>vai ao banco na
+hora</strong> — não passa pelo change tracker, não espera o <code>SaveChanges</code> do
+<a href="0005-pipeline-mediatr.html">UnitOfWorkBehavior</a>. Então a fatia grava em duas transações:
+</p>
+<pre><code>handler:   ExecuteUpdate  → UPDATE posts SET qtd_curtidas = qtd_curtidas + 1   <span class="cmt">(commit já)</span>
+behavior:  CommitAsync    → INSERT INTO likes ...                             <span class="cmt">(commit depois)</span></code></pre>
+<p>
+Se o <code>INSERT</code> falhar (a corrida do item 2), o incremento já foi. O contador fica um
+acima da realidade. Aceitamos isso conscientemente — está marcado com <code>ponytail:</code> no
+código, e o caminho de upgrade é uma transação explícita envolvendo o behavior inteiro.
+</p>
+<p>
+A lição não é "ExecuteUpdate é ruim": é que <strong>toda otimização que pula uma camada perde as
+garantias daquela camada</strong>. Você pulou o change tracker para ganhar atomicidade por linha;
+perdeu a atomicidade do caso de uso. Saber qual das duas dói mais no seu domínio é a decisão —
+aqui, contador levemente adiantado dói menos que curtida perdida.
+</p>
+
+<h2>5. Quem é "o mesmo visitante"?</h2>
+<p>
+O <code>viewer_hash</code> da <a href="0020-comentarios-rate-limit-memoria.html">Fatia 20</a> volta,
+com uma promoção: lá ele era chave de um balde em memória, aqui é <strong>coluna com índice
+único</strong>. Mesmo cálculo, no servidor:
+</p>
+<pre><code>HashVisitante.De(HttpContext)   <span class="cmt">// SHA-256 de IP + User-Agent</span></code></pre>
+<p>
+Se o cliente mandasse o hash, bastaria trocar um caractere para curtir de novo — o mesmo motivo
+pelo qual o path da imagem (Fatia 14) e o autor do post (Fatia 16) são montados no servidor.
+É aproximado por natureza: mesma rede corporativa e mesmo navegador colidem, VPN nova conta como
+visitante novo. Para um contador de curtidas de blog, aproximado basta.
+</p>
+<p>
+Repare também no que <strong>não</strong> tem aqui: rate limit. Comentário precisou de um
+(<code>LimitadorDeComentarios</code>) porque um visitante pode escrever infinitos. Curtida já é
+limitada a uma por visitante por post — pela constraint. <em>Modelagem certa dispensa
+mecanismo.</em>
+</p>
+
+<h2>Checkpoint</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que descurtir algo que nunca foi curtido devolve 204 e não 404?</p>
+<button>Porque o DELETE sem corpo de resposta é proibido pela especificação de devolver 404</button>
+<button>Porque a operação é idempotente: o estado final pedido pelo cliente já está valendo</button>
+<button>Porque o handler não consegue distinguir like ausente de like de outro visitante</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> O que realmente impede duas curtidas do mesmo visitante no mesmo post?</p>
+<button>O ExisteAsync do handler, que consulta o banco antes de decidir se insere a linha</button>
+<button>O hash do visitante, que por ser SHA-256 nunca repete entre duas requisições iguais</button>
+<button>O índice único (post_id, viewer_hash): entre o SELECT e o INSERT cabe outra requisição</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que o contador usa <code>ExecuteUpdateAsync</code> e não <code>post.QtdCurtidas++</code>?</p>
+<button>Porque ler-somar-gravar perde contagem: dois visitantes leem 5 e ambos gravam 6</button>
+<button>Porque o change tracker recusa alterar propriedade marcada como campo desnormalizado</button>
+<button>Porque o UnitOfWorkBehavior só commita entidades que foram carregadas com AsNoTracking</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Qual é o custo de usar <code>ExecuteUpdateAsync</code> dentro do handler?</p>
+<button>Ele carrega a entidade inteira do banco antes de aplicar a instrução de atualização</button>
+<button>Ele impede que o mesmo caso de uso escreva em qualquer outra tabela na mesma chamada</button>
+<button>Ele grava na hora, fora do commit do behavior: o caso de uso vira duas transações</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>5.</strong> Por que curtir não precisou de rate limit e comentar precisou?</p>
+<button>Porque o endpoint de curtir não aceita corpo e por isso não consegue receber abuso</button>
+<button>Porque a constraint já limita a uma curtida por visitante: a modelagem faz o trabalho</button>
+<button>Porque o limitador em memória é singleton e não poderia ser reusado em outra feature</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/ef/core/saving/execute-insert-update-delete">ExecuteUpdate
+and ExecuteDelete (Microsoft Learn)</a>. Complementos:
+<a href="https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS">Unique
+constraints (PostgreSQL)</a> e
+<a href="https://developer.mozilla.org/en-US/docs/Glossary/Idempotent">Idempotência (MDN)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0021-listar-comentarios-moderacao-admin.html">Aula 21 — filtered include e claims</a> ·
+<a href="0020-comentarios-rate-limit-memoria.html">Aula 20 — viewer_hash em memória</a> ·
+<a href="0019-listar-abrir-visualizacoes.html">Aula 19 — contador atômico de visualizações</a> ·
+<a href="0006-exception-handling.html">Aula 6 — exceção vira status</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

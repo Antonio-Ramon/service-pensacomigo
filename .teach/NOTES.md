@@ -157,6 +157,17 @@
   33 unit tests verdes (sem função pura nova). 4 testes de integração novos **sem Docker aqui**; o seed
   só tem admins, então o teste de 403 cria o usuário comum na hora. **Ticket 07 fechado.**
 
+- [x] Fatia 22 — Likes anônimos (aula 0022). `POST`/`DELETE api/v1/posts/{postId}/curtidas`,
+  ambos **idempotentes** (204 na repetição, sem 404 no descurtir a mais). `ILikeRepository` novo;
+  `AjustarCurtidasAsync(id, delta)` no `IPostRepository` com `ExecuteUpdateAsync` e guarda
+  `QtdCurtidas + delta >= 0` no `Where` (contador nunca negativo, sem `if` no C#). `ExisteAsync`
+  é conveniência; a **garantia** é o índice único `(post_id, viewer_hash)` já existente desde a
+  Fatia 1 → corrida vira `DbUpdateException` → 409 (já mapeado na Fatia 6). **Ressalva marcada com
+  `ponytail:`**: `ExecuteUpdate` grava fora do commit do `UnitOfWorkBehavior` → duas transações,
+  contador pode ficar +1 se o INSERT perder a corrida; upgrade = transação explícita. Sem rate
+  limit: a constraint já limita 1 por visitante. Build verde (8 proj, 0 erro), 33 unit tests
+  verdes. 5 testes de integração **sem Docker aqui**. **Ticket 08 fechado.**
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

@@ -71,4 +71,9 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
     calculada no servidor.
 21. ✅ **Listar comentários (árvore rasa) + moderação por admin**: filtered include, mapper do
     Gridify como fronteira de segurança e primeira autorização por **claim** (`is_admin`),
-    não só por "tem token". ← *estamos aqui*
+    não só por "tem token".
+
+## Roadmap do Ticket 08 (Likes)
+22. ✅ **Idempotência + unicidade no banco**: curtir/descurtir anônimo; `if` é conveniência e a
+    constraint única é a garantia; contador desnormalizado com `ExecuteUpdateAsync` nos dois
+    sentidos e o preço de pular o Unit of Work. ← *estamos aqui*
