@@ -62,11 +62,42 @@ endpoint público num painel de tudo que a moderação escondeu. O recorte fixo 
 do repositório, onde o cliente não alcança; a querystring só escolhe página, ordem e filtro
 <em>dentro</em> desse recorte.
 </p>
-<p class="card">
-Mesma ideia do <code>postId</code>: o controller faz <code>query.PostId = postId</code>
-<strong>depois</strong> do model binding. Mesmo que alguém mande <code>?postId=</code>, a rota vence.
-É o padrão que você já viu no <code>AutorId</code> vindo da claim (Fatia 16) e no path da imagem
-montado no servidor (Fatia 14): <em>dado que decide o que você enxerga nunca vem do cliente</em>.
+<h2>2b. O <code>postId</code> não é campo da consulta — e o Swagger provou isso</h2>
+<p>
+A primeira versão desta query herdava de <code>GridifyQuery</code> e ganhava uma propriedade
+<code>PostId</code> que o controller sobrescrevia com o valor da rota. Funcionava. Mas o Swagger
+passou a listar <strong>dois</strong> parâmetros de post: <code>postId (path)</code> e
+<code>PostId (query)</code> — o segundo, um campo que o cliente pode preencher e que o servidor
+descarta em silêncio. Contrato mentiroso.
+</p>
+<p>
+A causa é o model binding: toda propriedade pública gravável de um objeto <code>[FromQuery]</code>
+é bindável, e o ApiExplorer publica no contrato exatamente o que é bindável. Setter privado não
+resolveu (o ApiExplorer continua listando). O que resolve é parar de misturar as duas coisas —
+<strong>composição no lugar de herança</strong>:
+</p>
+<pre><code><span class="cmt">// Query: o que o cliente pede (Consulta) e o que o servidor decide (PostId), separados</span>
+public class ListarComentariosQuery(Guid postId, IGridifyQuery consulta)
+    : IQuery&lt;Pagina&lt;ComentarioListaResponse&gt;&gt;
+{
+    public Guid PostId { get; } = postId;
+    public IGridifyQuery Consulta { get; } = consulta;
+}
+
+<span class="cmt">// Controller: binda SÓ o GridifyQuery; o post sai da rota</span>
+public async Task&lt;ActionResult&lt;Pagina&lt;ComentarioListaResponse&gt;&gt;&gt; Listar(
+    Guid postId, [FromQuery] GridifyQuery consulta, CancellationToken ct) =&gt;
+    Ok(await mediator.Send(new ListarComentariosQuery(postId, consulta), ct));</code></pre>
+<p>
+Repare que a herança de <code>GridifyQuery</code> (Fatias 13 e 19) continua certa <em>lá</em>: em
+<code>ListarPostsQuery</code> a querystring é a consulta inteira, não há nada do servidor misturado.
+Herdar só é seguro quando o tipo herdado descreve <strong>tudo</strong> que o objeto é.
+</p>
+<p>
+E o princípio por trás continua o mesmo do <code>AutorId</code> vindo da claim (Fatia 16) e do path
+da imagem montado no servidor (Fatia 14): <em>dado que decide o que você enxerga nunca vem do
+cliente</em>. A diferença é que aqui não basta ignorar o que o cliente mandou — é preciso não
+oferecer o campo.
 </p>
 
 <h2>3. <code>[Authorize]</code> ≠ autorização</h2>
@@ -153,11 +184,11 @@ inteira de graça. Quando a modelagem da leitura está certa, a escrita fica peq
 <div class="fb"></div>
 </div>
 
-<div class="q" data-a="1">
-<p><strong>5.</strong> Por que o controller sobrescreve <code>query.PostId</code> com o valor da rota?</p>
-<button>Porque o binder do MVC ignora propriedades herdadas de uma classe base como GridifyQuery</button>
-<button>Porque senão a querystring poderia escolher de qual post o cliente lê os comentários</button>
-<button>Porque o MediatR precisa que todo campo do request seja atribuído antes do Send funcionar</button>
+<div class="q" data-a="0">
+<p><strong>5.</strong> Por que esta query <em>não</em> herda de <code>GridifyQuery</code>?</p>
+<button>Porque o PostId viraria campo bindável e o Swagger ofereceria um ?postId= que o servidor ignora</button>
+<button>Porque uma classe que herda de GridifyQuery jamais consegue implementar também a interface IQuery</button>
+<button>Porque o Gridify precisa receber a instância original do binder para conseguir traduzir o filtro</button>
 <div class="fb"></div>
 </div>
 

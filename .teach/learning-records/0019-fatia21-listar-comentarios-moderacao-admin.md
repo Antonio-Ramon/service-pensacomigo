@@ -23,9 +23,15 @@
 - **`RequireClaim` compara string exata** e `bool.ToString()` produz `"True"` com T
   maiúsculo → o `JwtTokenGenerator` passou a emitir `"true"`. Um T a mais e todo admin
   tomaria 403 sem nenhum erro no log. Achado ao ligar a policy, não por teste.
-- **Dado que decide o que você enxerga nunca vem do cliente.** O controller sobrescreve
-  `query.PostId` com o valor da ROTA depois do model binding — mesma lição do `AutorId`
-  da claim (Fatia 16) e do path da imagem montado no servidor (Fatia 14).
+- **Dado que decide o que você enxerga nunca vem do cliente** — e não basta ignorá-lo, é
+  preciso não oferecer o campo. A 1ª versão herdava de `GridifyQuery` com `PostId` sobrescrito
+  pelo controller: funcionava, mas o Swagger listava `postId (path)` **e** `PostId (query)`,
+  um campo preenchível que o servidor descartava em silêncio. **Setter privado não resolve**
+  (o ApiExplorer continua listando). A correção foi **composição no lugar de herança**:
+  `ListarComentariosQuery(Guid postId, IGridifyQuery consulta)`, o controller binda só o
+  `GridifyQuery`. Herdar do tipo bindado só é seguro quando ele descreve *tudo* que o objeto
+  é — como em `ListarPostsQuery` (Fatias 13/19), onde não há nada do servidor misturado.
+  *Achado pelo usuário olhando o Swagger, não por teste.*
 - **Esconder ≠ apagar.** Ocultar = `Aprovado = false` na entidade rastreada (UPDATE sai no
   `UnitOfWorkBehavior`), reversível, preserva o texto. Deletar = `Remove` + cascata do
   `parent_id` leva as respostas junto. Nenhum dos dois precisou esconder/apagar respostas

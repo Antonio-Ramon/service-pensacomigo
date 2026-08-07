@@ -1,3 +1,4 @@
+using Gridify;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,14 +32,10 @@ public class ComentariosController(ISender mediator) : ControllerBase
     /// <summary>Conversa do post (pública). Só aprovados, raízes paginadas com suas respostas.</summary>
     [HttpGet]
     public async Task<ActionResult<Pagina<ComentarioListaResponse>>> Listar(
-        Guid postId, [FromQuery] ListarComentariosQuery query, CancellationToken ct)
-    {
-        // A rota manda: o binder já preencheu o resto da querystring, aqui o postId
-        // é sobrescrito com o valor da URL — o cliente não escolhe de qual post lê.
-        query.PostId = postId;
-
-        return Ok(await mediator.Send(query, ct));
-    }
+        Guid postId, [FromQuery] GridifyQuery consulta, CancellationToken ct) =>
+        // Página/ordem/filtro vêm da querystring; o post sai da ROTA — o cliente não
+        // escolhe de qual post lê, e por isso `postId` não é campo da consulta.
+        Ok(await mediator.Send(new ListarComentariosQuery(postId, consulta), ct));
 
     /// <summary>Esconde o comentário (aprovado = false). Só admin — ver policy no Program.cs.</summary>
     [Authorize(Policy = "Admin")]

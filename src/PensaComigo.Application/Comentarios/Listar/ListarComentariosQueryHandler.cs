@@ -10,7 +10,7 @@ public class ListarComentariosQueryHandler(IComentarioRepository comentarios)
 {
     public async Task<Pagina<ComentarioListaResponse>> Handle(ListarComentariosQuery q, CancellationToken ct)
     {
-        var pagina = await comentarios.ListarAprovadosAsync(q.PostId, q, ct);
+        var pagina = await comentarios.ListarAprovadosAsync(q.PostId, q.Consulta, ct);
 
         return new Pagina<ComentarioListaResponse>(
             pagina.Items.Select(c => new ComentarioListaResponse(

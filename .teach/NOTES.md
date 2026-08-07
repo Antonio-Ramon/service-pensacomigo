@@ -140,9 +140,12 @@
   da Fatia 6). `ComentarioResponse` sem `DataCriacao` (commit é depois do handler). Build verde,
   **33 unit tests verdes** (18+15). 6 testes de integração **sem Docker aqui**. Issue 07: 5/7.
 
-- [x] Fatia 21 — Listar comentários + moderação admin (aula 0021). `ListarComentariosQuery : GridifyQuery`
-  ([AllowAnonymous] por ausência de [Authorize] na classe); controller sobrescreve `query.PostId` com o
-  valor da ROTA depois do binding. Repo pagina só as **raízes** (`ParentId == null && Aprovado`) e traz
+- [x] Fatia 21 — Listar comentários + moderação admin (aula 0021). `ListarComentariosQuery` NÃO herda de
+  `GridifyQuery` (ao contrário de posts/tags): **composição** `(Guid postId, IGridifyQuery consulta)`,
+  controller binda só o `GridifyQuery`. Herdando, `PostId` virava propriedade bindável e o Swagger
+  oferecia `?postId=` além do `{postId}` da rota — campo preenchível que o servidor descarta.
+  `[BindNever]` exigiria ASP.NET na Application (rejeitado); **setter privado NÃO tira do ApiExplorer**.
+  Repo pagina só as **raízes** (`ParentId == null && Aprovado`) e traz
   respostas por **filtered include** (`Include(c => c.Respostas.Where(r => r.Aprovado))`) → 1 JOIN, sem
   N+1. `TotalItems` = nº de conversas. Mapper com `autor`/`dataCriacao` só: `aprovado` fora dele de
   propósito (mapeado, `?filter=aprovado=false` seria painel público de moderação). Moderação:
