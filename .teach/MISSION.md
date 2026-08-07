@@ -58,5 +58,16 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
     ← *estamos aqui*
 
 ## Continuação do Ticket 05
-18. **Editar (slug congelado) + deletar**: outro lado do change tracker (`Update`/`Remove`) e
+18. ✅ **Editar (slug congelado) + deletar**: outro lado do change tracker (`Update`/`Remove`) e
     autorização por dono ("é seu mesmo?").
+
+## Roadmap do Ticket 06 (Post — listar / abrir)
+19. ✅ **Feed público**: `[AllowAnonymous]` vencendo `[Authorize]` da classe, rota por slug,
+    `ExecuteUpdateAsync` para contador atômico, dois *shapes* de resposta, Gridify sobre coleção.
+
+## Roadmap do Ticket 07 (Comentários)
+20. ✅ **Estado fora do banco**: `IMemoryCache` + tempo de vida no DI (`Singleton` vs `Scoped`,
+    *captive dependency*), relógio como parâmetro, validator vs handler, identidade do visitante
+    calculada no servidor. ← *estamos aqui*
+21. **Listar comentários (árvore rasa) + moderação por admin**: primeira autorização por
+    **claim** (`is_admin`), não só por "tem token".

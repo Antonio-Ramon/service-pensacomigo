@@ -129,6 +129,17 @@
   junção; `OrderBy` default `dataCriacao desc`. Build verde (8 proj, 0 erro), 18 unit tests verdes.
   4 testes de integração novos **sem Docker aqui**. **Ticket 06 fechado.**
 
+- [x] Fatia 20 — Comentários: escrita + moderação automática (aula 0020). `CriarComentarioCommand`
+  anônimo em rota aninhada `posts/{postId:guid}/comentarios`. **Primeiro estado fora do banco**:
+  `IMemoryCache` + `LimitadorDeComentarios` como **Singleton** (Scoped nasceria vazio; singleton
+  nunca injeta scoped — *captive dependency*). Funções puras `FiltroPalavrao` (reusa
+  `GeradorSlug.Gerar`, compara palavra inteira) e `JanelaDeslizante.Registrar` (**relógio como
+  parâmetro** → testa 1 min sem esperar 1 min; `null` = estourou). Palavrão no **validator**
+  (só vê o command), "resposta de resposta" no **handler** (precisa ler o pai). `viewer_hash`
+  calculado no servidor (SHA-256 IP+UA). `MuitasRequisicoesException` → **429** (fecha o buraco
+  da Fatia 6). `ComentarioResponse` sem `DataCriacao` (commit é depois do handler). Build verde,
+  **33 unit tests verdes** (18+15). 6 testes de integração **sem Docker aqui**. Issue 07: 5/7.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
