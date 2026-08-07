@@ -118,6 +118,17 @@
   (8 proj, 0 erro), 18 unit tests verdes. 3 testes de integração novos **sem Docker aqui**.
   **Ticket 05 fechado.**
 
+- [x] Fatia 19 — Feed público: listar + abrir + visualizações (aula 0019). `ListarPostsQuery : GridifyQuery`
+  ([AllowAnonymous]) e `AbrirPostCommand(slug)` no `PostsController` que é `[Authorize]` na classe —
+  **AllowAnonymous na ação vence**, o contrário não. `{slug}` não conflita com `{id:guid}` (verbo +
+  constraint). Abrir é **`ICommand`** apesar do GET (critério = efeito colateral, Fatia 17); contador
+  sobe com `ExecuteUpdateAsync(SetProperty(p => p.Qtd, p => p.Qtd + 1))` → `coluna = coluna + 1`
+  atômico, sem lost update; não passa pelo change tracker, daí o handler devolver `+ 1`.
+  `PostResumoResponse` (sem jsonb) ≠ `PostDetalheResponse` (conteúdo + autor + tags, `Include` +
+  `AsNoTracking`). Mapper com coleção: `.AddMap("tag", p => p.Tags.Select(t => t.Slug))` → EXISTS na
+  junção; `OrderBy` default `dataCriacao desc`. Build verde (8 proj, 0 erro), 18 unit tests verdes.
+  4 testes de integração novos **sem Docker aqui**. **Ticket 06 fechado.**
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
