@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 21 — Árvore rasa com filtered include e autorização por claim</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Árvore rasa com <em>filtered include</em> e autorização por <em>claim</em></h1>
+<p class="sub">Aula 21 · Fatia 21 · Ticket 07 — Comentários (leitura + moderação)</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> a conversa do post é lida por qualquer um em
+<code>GET /api/v1/posts/{postId}/comentarios</code> — raízes paginadas, cada uma com suas respostas —
+e só quem tem <code>is_admin=true</code> no token consegue esconder ou apagar um comentário.
+Não-admin com token válido leva <strong>403</strong>, não 401.
+</div>
+
+<h2>1. Paginar uma árvore: pagine as raízes, não as linhas</h2>
+<p>
+A tabela <code>comentarios</code> é plana: raiz e resposta são a mesma linha, separadas por
+<code>parent_id</code>. Se você paginar a tabela, <code>pageSize=20</code> devolve 20 <em>linhas</em> —
+e a página pode terminar no meio de uma conversa, com uma resposta órfã cujo pai ficou na página
+seguinte. O usuário lê "Que bom que ajudou" sem ver a que.
+</p>
+<p>
+A consulta pagina só as <strong>raízes</strong>, e cada raiz traz as respostas junto:
+</p>
+<pre><code>var raizes = db.Comentarios.AsNoTracking()
+    .Where(c =&gt; c.PostId == postId &amp;&amp; c.Aprovado &amp;&amp; c.ParentId == null)
+    .Include(c =&gt; c.Respostas.Where(r =&gt; r.Aprovado).OrderBy(r =&gt; r.DataCriacao));
+
+var (total, query) = await raizes.GridifyQueryableAsync(consulta, Mapper, ct);</code></pre>
+<p>
+Aquele <code>Where</code> <em>dentro</em> do <code>Include</code> é <strong>filtered include</strong>
+(EF Core 5+). Sem ele você teria três opções piores: carregar todas as respostas e filtrar em
+memória (traz lixo do banco), fazer um <code>SELECT</code> por raiz (N+1), ou escrever SQL na mão.
+O EF traduz isso para <em>um</em> JOIN com a condição embutida.
+<a href="https://learn.microsoft.com/en-us/ef/core/querying/related-data/eager#filtered-include">Docs
+do filtered include</a>.
+</p>
+<p>
+<code>TotalItems</code> passa a significar "quantas conversas", não "quantas linhas" — e é isso que o
+front precisa para montar o paginador.
+</p>
+
+<h2>2. O mapper do Gridify é a fronteira de segurança</h2>
+<p>
+Desde a Fatia 13 o <code>GridifyMapper</code> é uma whitelist do que o cliente pode filtrar. Aqui ele
+vira <strong>controle de acesso</strong>, e é o detalhe mais fácil de errar da fatia:
+</p>
+<pre><code>private static readonly IGridifyMapper&lt;Comentario&gt; Mapper = new GridifyMapper&lt;Comentario&gt;()
+    .AddMap("autor", c =&gt; c.Autor)
+    .AddMap("dataCriacao", c =&gt; c.DataCriacao);
+    <span class="cmt">// aprovado, postId e parentId NÃO entram aqui</span></code></pre>
+<p>
+Se <code>aprovado</code> estivesse mapeado, <code>?filter=aprovado=false</code> transformaria o
+endpoint público num painel de tudo que a moderação escondeu. O recorte fixo do endpoint
+(<code>postId</code>, <code>aprovado</code>, <code>parentId == null</code>) mora no <code>Where</code>
+do repositório, onde o cliente não alcança; a querystring só escolhe página, ordem e filtro
+<em>dentro</em> desse recorte.
+</p>
+<h2>2b. O <code>postId</code> não é campo da consulta — e o Swagger provou isso</h2>
+<p>
+A primeira versão desta query herdava de <code>GridifyQuery</code> e ganhava uma propriedade
+<code>PostId</code> que o controller sobrescrevia com o valor da rota. Funcionava. Mas o Swagger
+passou a listar <strong>dois</strong> parâmetros de post: <code>postId (path)</code> e
+<code>PostId (query)</code> — o segundo, um campo que o cliente pode preencher e que o servidor
+descarta em silêncio. Contrato mentiroso.
+</p>
+<p>
+A causa é o model binding: toda propriedade pública gravável de um objeto <code>[FromQuery]</code>
+é bindável, e o ApiExplorer publica no contrato exatamente o que é bindável. Setter privado não
+resolveu (o ApiExplorer continua listando). O que resolve é parar de misturar as duas coisas —
+<strong>composição no lugar de herança</strong>:
+</p>
+<pre><code><span class="cmt">// Query: o que o cliente pede (Consulta) e o que o servidor decide (PostId), separados</span>
+public class ListarComentariosQuery(Guid postId, IGridifyQuery consulta)
+    : IQuery&lt;Pagina&lt;ComentarioListaResponse&gt;&gt;
+{
+    public Guid PostId { get; } = postId;
+    public IGridifyQuery Consulta { get; } = consulta;
+}
+
+<span class="cmt">// Controller: binda SÓ o GridifyQuery; o post sai da rota</span>
+public async Task&lt;ActionResult&lt;Pagina&lt;ComentarioListaResponse&gt;&gt;&gt; Listar(
+    Guid postId, [FromQuery] GridifyQuery consulta, CancellationToken ct) =&gt;
+    Ok(await mediator.Send(new ListarComentariosQuery(postId, consulta), ct));</code></pre>
+<p>
+Repare que a herança de <code>GridifyQuery</code> (Fatias 13 e 19) continua certa <em>lá</em>: em
+<code>ListarPostsQuery</code> a querystring é a consulta inteira, não há nada do servidor misturado.
+Herdar só é seguro quando o tipo herdado descreve <strong>tudo</strong> que o objeto é.
+</p>
+<p>
+E o princípio por trás continua o mesmo do <code>AutorId</code> vindo da claim (Fatia 16) e do path
+da imagem montado no servidor (Fatia 14): <em>dado que decide o que você enxerga nunca vem do
+cliente</em>. A diferença é que aqui não basta ignorar o que o cliente mandou — é preciso não
+oferecer o campo.
+</p>
+
+<h2>3. <code>[Authorize]</code> ≠ autorização</h2>
+<p>
+Até agora <code>[Authorize]</code> respondia uma pergunta só: "tem token válido?". Moderar exige a
+segunda pergunta: "<em>quem</em> é você?". O JWT já carrega a resposta desde a Fatia 10 — a claim
+<code>is_admin</code>. Falta ligá-la a uma regra nomeada, a <strong>policy</strong>:
+</p>
+<pre><code><span class="cmt">// Program.cs</span>
+builder.Services.AddAuthorization(opcoes =&gt;
+    opcoes.AddPolicy("Admin", politica =&gt; politica.RequireClaim("is_admin", "true")));
+
+<span class="cmt">// ComentariosController.cs</span>
+[Authorize(Policy = "Admin")]
+[HttpPatch("{id:guid}/ocultar")]</code></pre>
+<p>
+A regra fica em <em>um</em> lugar; os endpoints só citam o nome. Quando amanhã "admin" virar
+"admin ou moderador", você muda a policy e não caça atributos pelo projeto.
+</p>
+<p>
+E repare no detalhe que quebra silenciosamente: <code>RequireClaim</code> compara
+<strong>string exata</strong>, e <code>bool.ToString()</code> em C# produz <code>"True"</code>
+com T maiúsculo. Por isso o gerador de token passou a emitir
+<code>usuario.IsAdmin ? "true" : "false"</code>. Um <code>T</code> a mais e todo admin tomaria 403,
+sem nenhum erro no log.
+</p>
+
+<div class="card">
+<strong>401 vs 403 — a distinção que o ASP.NET faz sozinho:</strong><br>
+<strong>401 Unauthorized</strong> = não sei quem você é (sem token, ou token inválido/expirado).<br>
+<strong>403 Forbidden</strong> = sei quem você é, e você não pode. A policy falhou.<br>
+Você não escreve nenhum <code>if</code> para isso: o middleware de autorização decide qual dos dois
+com base em ter havido autenticação bem-sucedida ou não.
+</div>
+
+<h2>4. Esconder ≠ apagar</h2>
+<p>
+Duas ações, dois efeitos diferentes — e a diferença é de negócio, não técnica:
+</p>
+<pre><code><span class="cmt">// Ocultar: a entidade vem RASTREADA do repo, então mudar a propriedade basta.</span>
+<span class="cmt">// O UPDATE sai no SaveChanges do UnitOfWorkBehavior (Fatia 5).</span>
+comentario.Aprovado = false;
+
+<span class="cmt">// Deletar: some do banco. As respostas caem por OnDelete(Cascade) no parent_id.</span>
+comentarios.Remover(comentario);</code></pre>
+<p>
+Ocultar preserva o texto para auditoria e é reversível; deletar é definitivo. E note o que
+<strong>não</strong> foi preciso escrever: ao esconder uma raiz, as respostas dela não precisam ser
+escondidas uma a uma — a listagem só devolve respostas de raízes visíveis, então a conversa some
+inteira de graça. Quando a modelagem da leitura está certa, a escrita fica pequena.
+</p>
+
+<h2>5. Checkpoint</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que a consulta pagina só os comentários raiz?</p>
+<button>Porque o Gridify não sabe traduzir uma propriedade de coleção para SQL no Postgres</button>
+<button>Porque paginar a tabela cortaria uma conversa no meio e deixaria resposta sem o pai</button>
+<button>Porque o filtered include exige que a consulta externa jamais aplique Skip ou Take</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que <code>aprovado</code> ficou fora do <code>GridifyMapper</code>?</p>
+<button>Porque coluna com valor default no schema não pode ser usada dentro de uma cláusula Where</button>
+<button>Porque o tipo bool precisaria de um conversor próprio para o Gridify entender o filtro</button>
+<button>Porque estando mapeado, filtrar por aprovado=false exporia tudo que a moderação escondeu</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Qual status um usuário autenticado <em>sem</em> a claim de admin recebe?</p>
+<button>403, porque a autenticação funcionou e o que falhou foi a regra de autorização</button>
+<button>401, porque o token não contém todas as claims que a rota protegida vai exigir</button>
+<button>422, porque a policy é avaliada como regra de negócio dentro do handler do command</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que o gerador de token passou a emitir <code>"true"</code> minúsculo?</p>
+<button>Porque o JSON Web Token rejeita valores de claim que comecem com letra maiúscula</button>
+<button>Porque o MapInboundClaims desligado converte o nome e o valor da claim para minúsculo</button>
+<button>Porque RequireClaim compara string exata e bool.ToString() produz "True" com T maiúsculo</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>5.</strong> Por que esta query <em>não</em> herda de <code>GridifyQuery</code>?</p>
+<button>Porque o PostId viraria campo bindável e o Swagger ofereceria um ?postId= que o servidor ignora</button>
+<button>Porque uma classe que herda de GridifyQuery jamais consegue implementar também a interface IQuery</button>
+<button>Porque o Gridify precisa receber a instância original do binder para conseguir traduzir o filtro</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/policies">Policy-based
+authorization in ASP.NET Core (Microsoft Learn)</a>. Complementos:
+<a href="https://learn.microsoft.com/en-us/ef/core/querying/related-data/eager#filtered-include">Filtered
+include (EF Core)</a> e
+<a href="https://learn.microsoft.com/en-us/aspnet/core/security/authorization/claims">Claims-based
+authorization</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0020-comentarios-rate-limit-memoria.html">Aula 20 — estado fora do banco</a> ·
+<a href="0013-gridify-listagem-paginada.html">Aula 13 — Gridify</a> ·
+<a href="0011-authorize-claims-perfil.html">Aula 11 — [Authorize] e claims</a> ·
+<a href="0019-listar-abrir-visualizacoes.html">Aula 19 — dois shapes de resposta</a>.
+Próxima: Ticket 08 — likes anônimos (o <code>viewer_hash</code> volta, agora como chave de unicidade
+no banco).
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

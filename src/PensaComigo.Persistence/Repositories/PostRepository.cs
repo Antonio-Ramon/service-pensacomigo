@@ -12,6 +12,9 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
     public Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default) =>
         db.Posts.FirstOrDefaultAsync(p => p.Id == id, ct);
 
+    public Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default) =>
+        db.Posts.AnyAsync(p => p.Id == id, ct);
+
     /// <summary>Whitelist do feed. `tag` filtra pela coleção (vira EXISTS na junção);
     /// nada fora daqui é filtrável, por mais que o cliente peça.</summary>
     private static readonly IGridifyMapper<Post> Mapper = new GridifyMapper<Post>()

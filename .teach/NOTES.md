@@ -129,6 +129,34 @@
   junção; `OrderBy` default `dataCriacao desc`. Build verde (8 proj, 0 erro), 18 unit tests verdes.
   4 testes de integração novos **sem Docker aqui**. **Ticket 06 fechado.**
 
+- [x] Fatia 20 — Comentários: escrita + moderação automática (aula 0020). `CriarComentarioCommand`
+  anônimo em rota aninhada `posts/{postId:guid}/comentarios`. **Primeiro estado fora do banco**:
+  `IMemoryCache` + `LimitadorDeComentarios` como **Singleton** (Scoped nasceria vazio; singleton
+  nunca injeta scoped — *captive dependency*). Funções puras `FiltroPalavrao` (reusa
+  `GeradorSlug.Gerar`, compara palavra inteira) e `JanelaDeslizante.Registrar` (**relógio como
+  parâmetro** → testa 1 min sem esperar 1 min; `null` = estourou). Palavrão no **validator**
+  (só vê o command), "resposta de resposta" no **handler** (precisa ler o pai). `viewer_hash`
+  calculado no servidor (SHA-256 IP+UA). `MuitasRequisicoesException` → **429** (fecha o buraco
+  da Fatia 6). `ComentarioResponse` sem `DataCriacao` (commit é depois do handler). Build verde,
+  **33 unit tests verdes** (18+15). 6 testes de integração **sem Docker aqui**. Issue 07: 5/7.
+
+- [x] Fatia 21 — Listar comentários + moderação admin (aula 0021). `ListarComentariosQuery` NÃO herda de
+  `GridifyQuery` (ao contrário de posts/tags): **composição** `(Guid postId, IGridifyQuery consulta)`,
+  controller binda só o `GridifyQuery`. Herdando, `PostId` virava propriedade bindável e o Swagger
+  oferecia `?postId=` além do `{postId}` da rota — campo preenchível que o servidor descarta.
+  `[BindNever]` exigiria ASP.NET na Application (rejeitado); **setter privado NÃO tira do ApiExplorer**.
+  Repo pagina só as **raízes** (`ParentId == null && Aprovado`) e traz
+  respostas por **filtered include** (`Include(c => c.Respostas.Where(r => r.Aprovado))`) → 1 JOIN, sem
+  N+1. `TotalItems` = nº de conversas. Mapper com `autor`/`dataCriacao` só: `aprovado` fora dele de
+  propósito (mapeado, `?filter=aprovado=false` seria painel público de moderação). Moderação:
+  `AddPolicy("Admin", p => p.RequireClaim("is_admin", "true"))` + `[Authorize(Policy = "Admin")]` no
+  `PATCH {id}/ocultar` e `DELETE {id}` → 401 sem token, **403** com token de não-admin (middleware
+  decide, sem `if`). **`RequireClaim` compara string exata e `bool.ToString()` dá `"True"`** → o
+  `JwtTokenGenerator` passou a emitir `"true"` minúsculo. Ocultar = `Aprovado = false` (rastreado,
+  UPDATE no UnitOfWork); deletar = `Remove` + cascata do `parent_id`. Build verde (8 proj, 0 erro),
+  33 unit tests verdes (sem função pura nova). 4 testes de integração novos **sem Docker aqui**; o seed
+  só tem admins, então o teste de 403 cria o usuário comum na hora. **Ticket 07 fechado.**
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

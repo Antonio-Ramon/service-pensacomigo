@@ -24,7 +24,9 @@ public class JwtTokenGenerator(IConfiguration config) : IJwtTokenGenerator
         [
             new(JwtRegisteredClaimNames.Sub, usuario.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, usuario.Email),
-            new("is_admin", usuario.IsAdmin.ToString()),
+            // Minúsculo: RequireClaim compara STRING exata, e bool.ToString() dá "True".
+            // Emitir "true" mantém o valor igual ao JSON e a policy legível.
+            new("is_admin", usuario.IsAdmin ? "true" : "false"),
         ];
 
         var token = new JwtSecurityToken(

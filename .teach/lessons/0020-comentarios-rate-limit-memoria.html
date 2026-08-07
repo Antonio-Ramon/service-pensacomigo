@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 20 — Estado fora do banco: IMemoryCache, tempo de vida no DI e o relógio como parâmetro</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Estado fora do banco: <code>IMemoryCache</code>, tempo de vida no DI e o relógio como parâmetro</h1>
+<p class="sub">Aula 20 · Fatia 20 · Ticket 07 — Comentários (moderação automática)</p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> qualquer leitor comenta sem conta em
+<code>POST /api/v1/posts/{postId}/comentarios</code>, pode responder <em>um</em> nível, palavrão é
+barrado antes de tocar no banco e o 6º comentário do mesmo visitante no mesmo minuto leva
+<strong>429</strong> — tudo isso sem nenhuma tabela nova.
+</div>
+
+<h2>1. Nem toda dependência é banco: <code>IMemoryCache</code></h2>
+<p>
+Até aqui, todo estado do sistema morava no Postgres. O rate limit não precisa disso: são cinco
+carimbos de tempo que expiram em um minuto. Gravar isso em tabela seria pagar disco, migration e
+limpeza por um dado descartável. O .NET já traz o lugar certo:
+</p>
+<pre><code>builder.Services.AddMemoryCache();          <span class="cmt">// no AddApplication()</span>
+
+public sealed class LimitadorDeComentarios(IMemoryCache cache)
+{
+    public void Registrar(string visitante)
+    {
+        var chave = $"comentarios:{visitante}";
+        var carimbos = JanelaDeslizante.Registrar(
+                           cache.Get&lt;List&lt;DateTime&gt;&gt;(chave) ?? [],
+                           DateTime.UtcNow, Janela, Maximo)
+                       ?? throw new MuitasRequisicoesException(...);
+
+        cache.Set(chave, carimbos, Janela);   <span class="cmt">// expiração = a própria janela</span>
+    }
+}</code></pre>
+<p>
+Repare no <code>cache.Set(chave, valor, Janela)</code>: o terceiro argumento é
+<em>expiração absoluta</em>. Visitante que parou de comentar some do cache sozinho — não existe
+rotina de limpeza, não existe vazamento de memória crescendo por visitante. É o cache fazendo o
+trabalho que uma tabela exigiria código para fazer.
+</p>
+<p class="card warn">
+<strong>O teto desta escolha:</strong> <code>IMemoryCache</code> é memória <em>do processo</em>. Com
+duas instâncias da API atrás de um balanceador, cada uma conta seu próprio balde e o limite efetivo
+vira 10/min. Está marcado com <code>ponytail:</code> no código: o upgrade é
+<code>IDistributedCache</code> com Redis, e o resto do desenho não muda — porque a decisão
+("estourou?") já está isolada numa função pura.
+</p>
+
+<h2>2. Tempo de vida no DI: por que <code>Singleton</code>, e não <code>Scoped</code></h2>
+<p>
+Isto é específico de .NET e é a fonte silenciosa de bugs "funciona na minha máquina". Os três tempos
+de vida do contêiner:
+</p>
+<table>
+<tr><th>Tempo de vida</th><th>Uma instância por…</th><th>Usado no projeto para</th></tr>
+<tr><td><code>Transient</code></td><td>cada injeção</td><td>objetos baratos e sem estado</td></tr>
+<tr><td><code>Scoped</code></td><td>requisição HTTP</td><td><code>DbContext</code>, repositórios, handlers</td></tr>
+<tr><td><code>Singleton</code></td><td>toda a aplicação</td><td><code>LimitadorDeComentarios</code>, <code>IMemoryCache</code></td></tr>
+</table>
+<p>
+O <code>DbContext</code> é <code>Scoped</code> de propósito: ele acumula o change tracker de
+<em>uma</em> requisição e precisa morrer no fim dela (aulas 4 e 18). Já o limitador é o oposto — se
+fosse <code>Scoped</code>, cada requisição nasceria com um balde vazio e o limite <strong>nunca</strong>
+bateria. O estado só serve se sobreviver <em>entre</em> requisições, logo: <code>Singleton</code>.
+</p>
+<p class="card warn">
+<strong>A regra que dói se você esquecer:</strong> um <code>Singleton</code> nunca pode receber um
+<code>Scoped</code> no construtor. Ele guardaria para sempre um <code>DbContext</code> da primeira
+requisição — objeto não thread-safe, compartilhado por todo mundo, com dados velhos. O contêiner do
+.NET até detecta isso na subida (<em>captive dependency</em>) quando o
+<code>ValidateScopes</code> está ligado, que é o padrão em Development. Por isso o limitador injeta
+<code>IMemoryCache</code> (que também é singleton) e nada mais.
+</p>
+
+<h2>3. O relógio como parâmetro: testar tempo sem esperar tempo</h2>
+<p>
+A conta do rate limit está numa função pura, com o "agora" entrando pela porta da frente:
+</p>
+<pre><code>public static List&lt;DateTime&gt;? Registrar(
+    IEnumerable&lt;DateTime&gt; carimbos, DateTime agora, TimeSpan janela, int maximo)
+{
+    var vigentes = carimbos.Where(c =&gt; agora - c &lt; janela).ToList();
+
+    if (vigentes.Count &gt;= maximo) return null;   <span class="cmt">// null = estourou</span>
+
+    vigentes.Add(agora);
+    return vigentes;
+}</code></pre>
+<p>
+Se <code>DateTime.UtcNow</code> estivesse <em>dentro</em> desta função, provar que a janela de um
+minuto funciona exigiria um teste que dorme 61 segundos. Com o relógio como parâmetro, o teste
+apenas <em>afirma</em> que horas são:
+</p>
+<pre><code>var anteriores = Enumerable.Repeat(Agora, 5).ToList();
+
+Assert.Null(JanelaDeslizante.Registrar(anteriores, Agora.AddSeconds(59), Janela, 5));
+Assert.NotNull(JanelaDeslizante.Registrar(anteriores, Agora.AddSeconds(61), Janela, 5));</code></pre>
+<p>
+É o mesmo movimento do <code>GeradorSlug</code> na aula 15 — <em>impureim sandwich</em>: o I/O e o
+relógio ficam nas bordas (a classe com o cache), a decisão fica no meio, pura e testável. Um
+detalhe de C# que vale registrar: o retorno é <code>List&lt;DateTime&gt;?</code> e o
+<code>null</code> <strong>é</strong> a resposta "estourou". O <code>??</code> no chamador transforma
+isso em exceção numa linha só.
+</p>
+<div class="card tip">
+<strong>Nota de .NET moderno:</strong> a partir do .NET 8 existe <code>TimeProvider</code>, a
+abstração oficial de relógio para injetar em classes que precisam de <code>UtcNow</code> ou de
+timer. Aqui não foi necessária, porque a única coisa que dependia do tempo virou parâmetro. Vale
+conhecer para quando a dependência não puder ser empurrada para a borda.
+</div>
+
+<h2>4. Onde cada regra mora: validator ou handler?</h2>
+<p>
+Esta fatia tem duas regras novas e elas foram para lugares diferentes. O critério não é gosto:
+</p>
+<table>
+<tr><th>Regra</th><th>Onde</th><th>Por quê</th></tr>
+<tr><td>Palavrão no texto</td><td><code>Validator</code></td><td>dá para decidir só olhando o campo</td></tr>
+<tr><td>Resposta de resposta</td><td><code>Handler</code></td><td>precisa ler o comentário pai no banco</td></tr>
+</table>
+<pre><code><span class="cmt">// Validator: falha de formato do campo → 422 campo-a-campo</span>
+RuleFor(c =&gt; c.Conteudo)
+    .Must(texto =&gt; !FiltroPalavrao.Contem(texto))
+    .WithMessage("Revise seu comentário: ele contém termos não permitidos.");
+
+<span class="cmt">// Handler: invariante de negócio → precisa do estado do banco</span>
+if (pai.ParentId is not null)
+    throw new RegraDeNegocioException("Só é possível responder a um comentário original.");</code></pre>
+<p>
+Um <code>AbstractValidator&lt;T&gt;</code> vê <strong>só o command</strong> — nenhum repositório,
+nenhuma consulta. Se responder a pergunta exige ir ao banco, ela não cabe ali; é do handler. Guardar
+essa fronteira é o que impede o validator de virar um segundo handler.
+</p>
+<p>
+E note onde a árvore de 1 nível é travada: <em>no handler</em>. O schema aceita
+<code>parent_id</code> apontando para qualquer comentário, em profundidade infinita — foi a
+Decisão #7 do projeto, deliberada. O banco garante integridade referencial; a <em>política</em> de
+produto fica no código, onde é barata de mudar.
+</p>
+
+<h2>5. A identidade do visitante anônimo é do servidor</h2>
+<pre><code>public static string De(HttpContext ctx)
+{
+    var bruto = $"{ctx.Connection.RemoteIpAddress}|{ctx.Request.Headers.UserAgent}";
+
+    return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(bruto)));
+}</code></pre>
+<p>
+Mesma lição do <em>path</em> da imagem na aula 14, agora com outra roupa: <strong>o que identifica
+alguém não pode vir de quem está sendo identificado</strong>. Se o cliente mandasse o
+<code>viewerHash</code> no corpo, trocar de valor zeraria o limite — e na issue 08 (likes)
+permitiria curtir o mesmo post infinitas vezes. Como consequência disso, o controller monta o
+command com dados de <em>duas</em> origens que o corpo não controla:
+</p>
+<pre><code>var command = new CriarComentarioCommand(
+    postId,                          <span class="cmt">// da rota</span>
+    req.ParentId, req.Autor, req.Conteudo,
+    HashVisitante.De(HttpContext));  <span class="cmt">// do servidor</span></code></pre>
+<p>
+O hash também serve à privacidade: o rate limit funciona igual, e nunca guardamos IP cru — que é
+dado pessoal.
+</p>
+
+<h2>6. Duas armadilhas que o código evita (e você vai reencontrar)</h2>
+<h3>A resposta é montada antes do <code>SaveChanges</code></h3>
+<p>
+<code>comentarios.data_criacao</code> tem <code>default now()</code> no banco. O handler devolve o
+<code>ComentarioResponse</code> e só <em>depois</em> o <code>UnitOfWorkBehavior</code> commita — ou
+seja, no momento em que a resposta é criada aquele campo ainda é <code>default(DateTime)</code>, uma
+data no ano 1. Por isso <code>ComentarioResponse</code> simplesmente <strong>não tem</strong>
+<code>DataCriacao</code>; quem precisa da data é a listagem, que lê do banco.
+</p>
+<h3>Teste com estado global se contamina</h3>
+<pre><code>private HttpClient ClienteVisitante()
+{
+    var client = factory.CreateClient();
+    client.DefaultRequestHeaders.UserAgent.ParseAdd($"teste-{Guid.NewGuid():N}/1.0");
+    return client;
+}</code></pre>
+<p>
+No <code>WebApplicationFactory</code> não há IP nem User-Agent reais: todos os clientes gerariam o
+<strong>mesmo hash</strong>, dividiriam o mesmo balde, e o 6º comentário do arquivo inteiro tomaria
+429 — quebrando um teste inocente lá no fim. Dar um User-Agent único a cada teste devolve o
+isolamento. Sempre que um teste depende de estado que vive fora dele, isole a <em>chave</em> desse
+estado.
+</p>
+
+<h2>Quiz</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que <code>LimitadorDeComentarios</code> é registrado como <code>Singleton</code>?</p>
+<button>Porque toda classe que depende de IMemoryCache precisa do mesmo tempo de vida dele</button>
+<button>Porque o balde de carimbos precisa sobreviver entre requisições, senão nunca enche</button>
+<button>Porque handlers do MediatR só aceitam receber dependências registradas como singleton</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> O que acontece se um <code>Singleton</code> injetar o <code>DbContext</code> no construtor?</p>
+<button>Nada de grave: o contêiner cria um escopo novo a cada uso e devolve um contexto limpo</button>
+<button>O EF Core recusa a injeção e o handler recebe null no lugar do contexto configurado</button>
+<button>Ele segura o contexto da primeira requisição para sempre — dados velhos e sem thread safety</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que o "agora" é parâmetro de <code>JanelaDeslizante.Registrar</code>?</p>
+<button>Para o teste afirmar que horas são, em vez de dormir 61 segundos esperando a janela</button>
+<button>Para o fuso horário do servidor ser aplicado sobre os carimbos antes da comparação</button>
+<button>Para o cache conseguir calcular sozinho a expiração absoluta da chave do visitante</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que "resposta de resposta" é regra do handler, e não do validator?</p>
+<button>Porque erros do handler viram 422 e erros do validator sempre viram 400 no cliente</button>
+<button>Porque o FluentValidation não consegue avaliar uma propriedade do tipo Guid anulável</button>
+<button>Porque responder exige ler o comentário pai no banco, e o validator só vê o command</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>5.</strong> Por que o hash do visitante é calculado no servidor, e não enviado pelo cliente?</p>
+<button>Porque calcular SHA-256 no navegador exige HTTPS e nem todo cliente teria suporte</button>
+<button>Porque quem manda a própria identidade só precisa trocá-la para zerar o rate limit</button>
+<button>Porque o hash precisa ser estável entre deploys para o cache não perder as chaves</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection#service-lifetimes">Service
+lifetimes (Microsoft Learn)</a> — inclui a seção sobre <em>captive dependencies</em>. Complementos:
+<a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/memory">Cache in-memory in
+ASP.NET Core</a> e
+<a href="https://learn.microsoft.com/en-us/dotnet/standard/datetime/timeprovider-overview">TimeProvider
+overview</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0019-listar-abrir-visualizacoes.html">Aula 19 — feed público</a> ·
+<a href="0015-funcao-pura-teste-unitario.html">Aula 15 — função pura e teste unitário</a> ·
+<a href="0014-httpclient-options-signed-url.html">Aula 14 — dado do servidor, não do cliente</a>.
+Próxima: listar comentários com respostas (Gridify) e moderação por admin — autorização por
+<em>claim</em>, não só por token.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

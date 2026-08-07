@@ -8,6 +8,9 @@ public interface IPostRepository
 {
     Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Só a existência (vira `EXISTS` no SQL) — para quem não vai usar a entidade.</summary>
+    Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default);
+
     /// <summary>Feed paginado/filtrado/ordenado pela querystring (Gridify, Fatia 13).</summary>
     Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default);
 

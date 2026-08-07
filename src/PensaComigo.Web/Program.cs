@@ -118,7 +118,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             },
         };
     });
-builder.Services.AddAuthorization();
+// Primeira autorização por CLAIM, não por "tem token": [Authorize] só exige autenticado;
+// a policy exige `is_admin=true` no JWT. Quem não é admin toma 403 (autenticado, sem permissão),
+// não 401. Regra num lugar só — mudar aqui muda todos os [Authorize(Policy = "Admin")].
+builder.Services.AddAuthorization(opcoes =>
+    opcoes.AddPolicy("Admin", politica => politica.RequireClaim("is_admin", "true")));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
