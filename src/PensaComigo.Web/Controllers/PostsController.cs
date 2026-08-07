@@ -4,9 +4,12 @@ using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PensaComigo.Application.Posts;
+using PensaComigo.Application.Posts.Abrir;
 using PensaComigo.Application.Posts.Criar;
 using PensaComigo.Application.Posts.Deletar;
 using PensaComigo.Application.Posts.Editar;
+using PensaComigo.Application.Posts.Listar;
+using PensaComigo.Domain.Common;
 
 namespace PensaComigo.Web.Controllers;
 
@@ -17,6 +20,20 @@ namespace PensaComigo.Web.Controllers;
 [Route("api/v1/[controller]")]
 public class PostsController(ISender mediator) : ControllerBase
 {
+    /// <summary>Feed público. Filtro/ordem/página na querystring (Gridify).</summary>
+    [AllowAnonymous]
+    [HttpGet]
+    public async Task<ActionResult<Pagina<PostResumoResponse>>> Listar(
+        [FromQuery] ListarPostsQuery query, CancellationToken ct) =>
+        Ok(await mediator.Send(query, ct));
+
+    /// <summary>Abrir post pelo slug (público). Rota `{slug}` fica depois de `{id:guid}`
+    /// nas escritas, mas não conflita: aquelas são PUT/DELETE.</summary>
+    [AllowAnonymous]
+    [HttpGet("{slug}")]
+    public async Task<ActionResult<PostDetalheResponse>> Abrir(string slug, CancellationToken ct) =>
+        Ok(await mediator.Send(new AbrirPostCommand(slug), ct));
+
     [HttpPost]
     public async Task<ActionResult<PostResponse>> Criar(CriarPostRequest req, CancellationToken ct)
     {

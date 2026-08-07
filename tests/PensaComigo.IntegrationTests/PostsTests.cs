@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PensaComigo.Application.Auth;
 using PensaComigo.Application.Posts;
+using PensaComigo.Domain.Common;
 using PensaComigo.Domain.Enums;
 using PensaComigo.Persistence;
 
@@ -150,6 +151,84 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
 
         Assert.False(await db.Posts.AnyAsync(p => p.Id == post.Id));
         Assert.True(await db.Tags.AnyAsync(t => t.Id == tag));   // cascata leva a junção, não a tag
+    }
+
+    [Fact]
+    public async Task Abre_post_por_slug_anonimo_com_autor_tags_e_incrementa_visualizacoes()
+    {
+        var autor = await ClienteAutenticadoAsync();
+        var tag = await CriarTagAsync(autor, $"Presença {Guid.NewGuid():N}");
+        var criado = await CriarPostAsync(autor, $"Abrir e contar {Guid.NewGuid():N}", tag);
+
+        var anonimo = factory.CreateClient();   // sem token: leitura é pública
+        var resp = await anonimo.GetAsync($"/api/v1/posts/{criado.Slug}");
+
+        resp.EnsureSuccessStatusCode();
+        var post = await resp.Content.ReadFromJsonAsync<PostDetalheResponse>();
+
+        Assert.Equal(criado.Id, post!.Id);
+        Assert.Equal("Antonio Ramon", post.Autor.Nome);
+        Assert.Equal(tag, Assert.Single(post.Tags).Id);
+        Assert.Single(post.Conteudo);
+        Assert.Equal(1, post.QtdVisualizacoes);   // primeira abertura
+
+        await anonimo.GetAsync($"/api/v1/posts/{criado.Slug}");
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+
+        Assert.Equal(2, (await db.Posts.AsNoTracking().FirstAsync(p => p.Id == criado.Id)).QtdVisualizacoes);
+    }
+
+    [Fact]
+    public async Task Abrir_slug_inexistente_devolve_404()
+    {
+        var resp = await factory.CreateClient().GetAsync($"/api/v1/posts/nao-existe-{Guid.NewGuid():N}");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Lista_posts_anonima_devolve_envelope_e_respeita_filtro_por_tag()
+    {
+        var autor = await ClienteAutenticadoAsync();
+        var nomeTag = $"Feed {Guid.NewGuid():N}";
+        var tag = await CriarTagAsync(autor, nomeTag);
+        var slugTag = (await ListarTagAsync(nomeTag)).Slug;
+        var meu = await CriarPostAsync(autor, $"Só este tem a tag {Guid.NewGuid():N}", tag);
+        await CriarPostAsync(autor, $"Este não tem {Guid.NewGuid():N}");
+
+        var resp = await factory.CreateClient().GetAsync($"/api/v1/posts?filter=tag={slugTag}");
+
+        resp.EnsureSuccessStatusCode();
+        var pagina = await resp.Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
+
+        Assert.Equal(1, pagina!.TotalItems);
+        Assert.Equal(meu.Id, Assert.Single(pagina.Items).Id);
+    }
+
+    [Fact]
+    public async Task Lista_posts_ordena_por_data_desc_por_padrao()
+    {
+        var autor = await ClienteAutenticadoAsync();
+        var marca = $"{Guid.NewGuid():N}";   // isola estes dois posts do resto do banco
+        await CriarPostAsync(autor, $"Antigo {marca}");
+        var novo = await CriarPostAsync(autor, $"Recente {marca}");
+
+        var resp = await factory.CreateClient().GetAsync($"/api/v1/posts?filter=titulo=*{marca}");
+
+        resp.EnsureSuccessStatusCode();
+        var pagina = await resp.Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
+
+        Assert.Equal(2, pagina!.TotalItems);
+        Assert.Equal(novo.Id, pagina.Items[0].Id);   // sem OrderBy na querystring → data desc
+    }
+
+    private async Task<Domain.Entities.Tag> ListarTagAsync(string nome)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+        return await db.Tags.AsNoTracking().FirstAsync(t => t.Nome == nome);
     }
 
     private static string Texto(int palavras) =>
