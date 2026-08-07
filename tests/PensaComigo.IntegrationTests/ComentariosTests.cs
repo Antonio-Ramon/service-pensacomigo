@@ -5,7 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PensaComigo.Application.Auth;
 using PensaComigo.Application.Comentarios;
+using PensaComigo.Application.Comentarios.Listar;
 using PensaComigo.Application.Posts;
+using PensaComigo.Domain.Common;
+using PensaComigo.Domain.Entities;
 using PensaComigo.Domain.Enums;
 using PensaComigo.Persistence;
 
@@ -127,6 +130,127 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         outro.EnsureSuccessStatusCode();
     }
 
+    [Fact]
+    public async Task Lista_arvore_rasa_com_respostas_e_envelope_paginado()
+    {
+        var post = await CriarPostAsync();
+        var raiz = await ComentarAsync(ClienteVisitante(), post.Id, "Primeira raiz");
+        await ResponderAsync(ClienteVisitante(), post.Id, raiz.Id, "Resposta da raiz");
+        await ComentarAsync(ClienteVisitante(), post.Id, "Segunda raiz");
+
+        // Anônimo: listar não pede token.
+        var pagina = await factory.CreateClient()
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+
+        // TotalItems conta RAÍZES (2), não as 3 linhas da tabela.
+        Assert.Equal(2, pagina!.TotalItems);
+        Assert.Equal(2, pagina.Items.Count);
+
+        var primeira = pagina.Items[0];
+        Assert.Equal("Primeira raiz", primeira.Conteudo);
+        Assert.Equal("Resposta da raiz", Assert.Single(primeira.Respostas).Conteudo);
+        Assert.Empty(pagina.Items[1].Respostas);
+        Assert.NotEqual(default, primeira.DataCriacao);   // agora sim: veio do banco
+    }
+
+    [Fact]
+    public async Task Filtro_e_paginacao_da_querystring_valem_mas_aprovado_nao_e_filtravel()
+    {
+        var post = await CriarPostAsync();
+        await ComentarAsync(ClienteVisitante(), post.Id, "Sobre respirar");
+        var oculto = await ComentarAsync(ClienteVisitante(), post.Id, "Vai sumir");
+
+        var escondeu = await (await ClienteAdminAsync()).PatchAsync(
+            $"/api/v1/posts/{post.Id}/comentarios/{oculto.Id}/ocultar", new StringContent(string.Empty));
+
+        Assert.Equal(HttpStatusCode.NoContent, escondeu.StatusCode);
+
+        var anonimo = factory.CreateClient();
+
+        // Escondido não volta nem pedindo explicitamente: `aprovado` não está no mapper,
+        // e campo não mapeado é IGNORADO (IgnoreNotMappedFields no Program).
+        var tentativa = await anonimo.GetFromJsonAsync<Pagina<ComentarioListaResponse>>(
+            $"/api/v1/posts/{post.Id}/comentarios?filter=aprovado=false");
+
+        Assert.Equal(1, tentativa!.TotalItems);
+        Assert.DoesNotContain(tentativa.Items, c => c.Id == oculto.Id);
+
+        // O que ESTÁ no mapper funciona normalmente.
+        var porAutor = await anonimo.GetFromJsonAsync<Pagina<ComentarioListaResponse>>(
+            $"/api/v1/posts/{post.Id}/comentarios?filter=autor=Ninguém&pageSize=1");
+
+        Assert.Equal(0, porAutor!.TotalItems);
+    }
+
+    [Fact]
+    public async Task Admin_deleta_comentario_e_a_resposta_cai_junto()
+    {
+        var post = await CriarPostAsync();
+        var raiz = await ComentarAsync(ClienteVisitante(), post.Id, "Raiz condenada");
+        var resposta = await ResponderAsync(ClienteVisitante(), post.Id, raiz.Id, "Vou junto");
+
+        var apagou = await (await ClienteAdminAsync())
+            .DeleteAsync($"/api/v1/posts/{post.Id}/comentarios/{raiz.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, apagou.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+
+        // Cascata da auto-referência parent_id: quem apaga a resposta é o banco.
+        Assert.False(await db.Comentarios.AnyAsync(c => c.Id == raiz.Id || c.Id == resposta.Id));
+    }
+
+    [Fact]
+    public async Task Sem_token_401_e_com_token_de_nao_admin_403()
+    {
+        var post = await CriarPostAsync();
+        var alvo = await ComentarAsync(ClienteVisitante(), post.Id, "Comentário inocente");
+        var rota = $"/api/v1/posts/{post.Id}/comentarios/{alvo.Id}";
+
+        var anonimo = await factory.CreateClient().DeleteAsync(rota);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonimo.StatusCode);
+
+        // Autenticado mas sem a claim: 403 (sei quem é você, não pode) — não 401.
+        var comum = await (await ClienteAsync(admin: false)).DeleteAsync(rota);
+        Assert.Equal(HttpStatusCode.Forbidden, comum.StatusCode);
+    }
+
+    private static Task<ComentarioResponse> ResponderAsync(
+        HttpClient client, Guid postId, Guid paiId, string texto) =>
+        ComentarAsync(client, postId, texto, paiId);
+
+    /// <summary>Cliente com JWT de um usuário do seed (todos admin).</summary>
+    private Task<HttpClient> ClienteAdminAsync() => ClienteAsync(admin: true);
+
+    private async Task<HttpClient> ClienteAsync(bool admin)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+        var jwt = scope.ServiceProvider.GetRequiredService<IJwtTokenGenerator>();
+
+        // O seed só tem admins — o usuário comum é criado aqui, uma vez.
+        var usuario = await db.Usuarios.FirstOrDefaultAsync(u => u.IsAdmin == admin);
+        if (usuario is null)
+        {
+            usuario = new Usuario
+            {
+                Id = Guid.NewGuid(),
+                Nome = "Leitor Comum",
+                Email = $"comum-{Guid.NewGuid():N}@teste.com",
+                GoogleId = Guid.NewGuid().ToString(),
+                ImagemUrl = "https://exemplo.com/foto.png",
+                IsAdmin = false,
+            };
+            db.Usuarios.Add(usuario);
+            await db.SaveChangesAsync();
+        }
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt.Gerar(usuario));
+        return client;
+    }
+
     /// <summary>Cliente anônimo com identidade de visitante única (isola o rate limit).</summary>
     private HttpClient ClienteVisitante()
     {
@@ -135,10 +259,11 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         return client;
     }
 
-    private static async Task<ComentarioResponse> ComentarAsync(HttpClient client, Guid postId, string texto)
+    private static async Task<ComentarioResponse> ComentarAsync(
+        HttpClient client, Guid postId, string texto, Guid? paiId = null)
     {
         var resp = await client.PostAsJsonAsync($"/api/v1/posts/{postId}/comentarios",
-            new { autor = "Leitor", conteudo = texto });
+            new { parentId = paiId, autor = "Leitor", conteudo = texto });
 
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<ComentarioResponse>())!;
