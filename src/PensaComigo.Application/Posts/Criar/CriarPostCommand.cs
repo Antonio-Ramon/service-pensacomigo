@@ -12,4 +12,4 @@ public record CriarPostCommand(
     string Titulo,
     string ImagemCapa,
     List<Guid> TagIds,
-    List<Bloco> Conteudo) : ICommand<PostResponse>;
+    List<Bloco> Conteudo) : ICommand<PostResponse>, IPostEscrita;

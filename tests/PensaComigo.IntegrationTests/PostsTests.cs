@@ -82,6 +82,94 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
         Assert.Equal(HttpStatusCode.UnprocessableEntity, resp.StatusCode);
     }
 
+    [Fact]
+    public async Task Edita_post_mantem_slug_troca_tags_e_recalcula_tempo()
+    {
+        var client = await ClienteAutenticadoAsync();
+        var tagA = await CriarTagAsync(client, $"Calma {Guid.NewGuid():N}");
+        var tagB = await CriarTagAsync(client, $"Foco {Guid.NewGuid():N}");
+        var criado = await CriarPostAsync(client, "Voltar Ao Corpo", tagA, palavras: 100);
+
+        var resp = await client.PutAsJsonAsync($"/api/v1/posts/{criado.Id}", new
+        {
+            titulo = "Outro Título Completamente Diferente",
+            imagemCapa = "posts/nova.webp",
+            tagIds = new[] { tagB },
+            conteudo = new object[]
+            {
+                new { tipo = TipoBloco.Texto, ordem = 1, html = Texto(600) },
+            },
+        });
+
+        resp.EnsureSuccessStatusCode();
+        var editado = await resp.Content.ReadFromJsonAsync<PostResponse>();
+
+        Assert.Equal(criado.Slug, editado!.Slug);   // slug congelado, mesmo com título novo
+        Assert.Equal(3, editado.TempoLeitura);      // 600 palavras / 200 ppm
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+        var salvo = await db.Posts.Include(p => p.Tags).AsNoTracking().FirstAsync(p => p.Id == criado.Id);
+
+        Assert.Equal("posts/nova.webp", salvo.ImagemCapa);
+        Assert.Single(salvo.Conteudo);
+        Assert.Equal(tagB, Assert.Single(salvo.Tags).Id);   // junção trocada, não somada
+    }
+
+    [Fact]
+    public async Task Editar_post_de_outro_autor_devolve_404()
+    {
+        var dono = await ClienteAutenticadoAsync();
+        var intruso = await ClienteAutenticadoAsync("Jessica");
+        var post = await CriarPostAsync(dono, $"Post do dono {Guid.NewGuid():N}");
+
+        var resp = await intruso.PutAsJsonAsync($"/api/v1/posts/{post.Id}", new
+        {
+            titulo = "Sequestrado",
+            imagemCapa = "posts/capa.webp",
+            tagIds = Array.Empty<Guid>(),
+            conteudo = new object[] { new { tipo = TipoBloco.Texto, ordem = 1, html = Texto(10) } },
+        });
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleta_post_do_proprio_autor_e_some_do_banco()
+    {
+        var client = await ClienteAutenticadoAsync();
+        var tag = await CriarTagAsync(client, $"Silêncio {Guid.NewGuid():N}");
+        var post = await CriarPostAsync(client, $"Para apagar {Guid.NewGuid():N}", tag);
+
+        var resp = await client.DeleteAsync($"/api/v1/posts/{post.Id}");
+
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+
+        Assert.False(await db.Posts.AnyAsync(p => p.Id == post.Id));
+        Assert.True(await db.Tags.AnyAsync(t => t.Id == tag));   // cascata leva a junção, não a tag
+    }
+
+    private static string Texto(int palavras) =>
+        "<p>" + string.Join(" ", Enumerable.Repeat("palavra", palavras)) + "</p>";
+
+    private static async Task<PostResponse> CriarPostAsync(
+        HttpClient client, string titulo, Guid? tagId = null, int palavras = 10)
+    {
+        var resp = await client.PostAsJsonAsync("/api/v1/posts", new
+        {
+            titulo,
+            imagemCapa = "posts/capa.webp",
+            tagIds = tagId is null ? Array.Empty<Guid>() : [tagId.Value],
+            conteudo = new object[] { new { tipo = TipoBloco.Texto, ordem = 1, html = Texto(palavras) } },
+        });
+
+        resp.EnsureSuccessStatusCode();
+        return (await resp.Content.ReadFromJsonAsync<PostResponse>())!;
+    }
+
     private async Task<Guid> CriarTagAsync(HttpClient client, string nome)
     {
         var resp = await client.PostAsJsonAsync("/api/v1/tags", new { nome });
@@ -89,12 +177,12 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
         return (await resp.Content.ReadFromJsonAsync<Application.Tags.TagResponse>())!.Id;
     }
 
-    private async Task<HttpClient> ClienteAutenticadoAsync()
+    private async Task<HttpClient> ClienteAutenticadoAsync(string nome = "Antonio Ramon")
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
         var jwt = scope.ServiceProvider.GetRequiredService<IJwtTokenGenerator>();
-        var autor = await db.Usuarios.FirstAsync(u => u.Nome == "Antonio Ramon");
+        var autor = await db.Usuarios.FirstAsync(u => u.Nome.StartsWith(nome));
 
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt.Gerar(autor));
