@@ -68,6 +68,7 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Roadmap do Ticket 07 (Comentários)
 20. ✅ **Estado fora do banco**: `IMemoryCache` + tempo de vida no DI (`Singleton` vs `Scoped`,
     *captive dependency*), relógio como parâmetro, validator vs handler, identidade do visitante
-    calculada no servidor. ← *estamos aqui*
-21. **Listar comentários (árvore rasa) + moderação por admin**: primeira autorização por
-    **claim** (`is_admin`), não só por "tem token".
+    calculada no servidor.
+21. ✅ **Listar comentários (árvore rasa) + moderação por admin**: filtered include, mapper do
+    Gridify como fronteira de segurança e primeira autorização por **claim** (`is_admin`),
+    não só por "tem token". ← *estamos aqui*

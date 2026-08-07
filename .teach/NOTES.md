@@ -140,6 +140,20 @@
   da Fatia 6). `ComentarioResponse` sem `DataCriacao` (commit é depois do handler). Build verde,
   **33 unit tests verdes** (18+15). 6 testes de integração **sem Docker aqui**. Issue 07: 5/7.
 
+- [x] Fatia 21 — Listar comentários + moderação admin (aula 0021). `ListarComentariosQuery : GridifyQuery`
+  ([AllowAnonymous] por ausência de [Authorize] na classe); controller sobrescreve `query.PostId` com o
+  valor da ROTA depois do binding. Repo pagina só as **raízes** (`ParentId == null && Aprovado`) e traz
+  respostas por **filtered include** (`Include(c => c.Respostas.Where(r => r.Aprovado))`) → 1 JOIN, sem
+  N+1. `TotalItems` = nº de conversas. Mapper com `autor`/`dataCriacao` só: `aprovado` fora dele de
+  propósito (mapeado, `?filter=aprovado=false` seria painel público de moderação). Moderação:
+  `AddPolicy("Admin", p => p.RequireClaim("is_admin", "true"))` + `[Authorize(Policy = "Admin")]` no
+  `PATCH {id}/ocultar` e `DELETE {id}` → 401 sem token, **403** com token de não-admin (middleware
+  decide, sem `if`). **`RequireClaim` compara string exata e `bool.ToString()` dá `"True"`** → o
+  `JwtTokenGenerator` passou a emitir `"true"` minúsculo. Ocultar = `Aprovado = false` (rastreado,
+  UPDATE no UnitOfWork); deletar = `Remove` + cascata do `parent_id`. Build verde (8 proj, 0 erro),
+  33 unit tests verdes (sem função pura nova). 4 testes de integração novos **sem Docker aqui**; o seed
+  só tem admins, então o teste de 403 cria o usuário comum na hora. **Ticket 07 fechado.**
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e
