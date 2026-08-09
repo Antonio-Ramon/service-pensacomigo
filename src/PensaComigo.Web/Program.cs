@@ -1,8 +1,10 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Gridify;
 using Gridify.EntityFramework;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -16,6 +18,7 @@ using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
 using PensaComigo.Web.Storage;
 using PensaComigo.Web.Swagger;
+using PensaComigo.Web.Visitantes;
 
 // Gridify (padrão de listagem, arquitetura §7.1): traduz o filtro pra SQL via EF Core e
 // ignora campo não mapeado no GridifyMapper em vez de estourar exceção.
@@ -79,6 +82,48 @@ builder.Services.AddHttpClient<IStorage, SupabaseStorage>((sp, http) =>
         new AuthenticationHeaderValue("Bearer", supabase.ServiceRoleKey);
 });
 
+// Atrás de proxy/ingress o RemoteIpAddress é o do PROXY para todo mundo, e a identidade do
+// visitante (IP + User-Agent) colapsa: dois leitores com o mesmo navegador viram um só.
+var proxiesConfiaveis = builder.Configuration.GetSection("ProxiesConfiaveis").Get<string[]>() ?? [];
+builder.Services.Configure<ForwardedHeadersOptions>(opcoes =>
+{
+    // CUIDADO: o middleware só checa a origem se HOUVER allowlist — com as duas listas vazias
+    // ele aceita X-Forwarded-For de qualquer cliente, que aí escolhe a própria identidade
+    // (curte o mesmo post infinitas vezes, zera o rate limit dos comentários). Por isso sem
+    // config o header é simplesmente ignorado, em vez de "confiar em todo mundo".
+    if (proxiesConfiaveis.Length == 0)
+    {
+        opcoes.ForwardedHeaders = ForwardedHeaders.None;
+        return;
+    }
+
+    opcoes.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    // O default confia no loopback; quem chega em produção é o ingress, então a lista vem do config.
+    opcoes.KnownProxies.Clear();
+    opcoes.KnownIPNetworks.Clear();
+
+    foreach (var proxy in proxiesConfiaveis)
+    {
+        // IP solto ou CIDR — ingress em k8s/cloud LB é faixa, não endereço fixo.
+        if (proxy.Contains('/'))
+        {
+            opcoes.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(proxy));
+        }
+        else
+        {
+            opcoes.KnownProxies.Add(IPAddress.Parse(proxy));
+        }
+    }
+});
+
+// Pepper do hash do visitante. Mesmo padrão do Supabase: validado NA SUBIDA — sem ele a
+// aplicação não sobe, em vez de estourar 500 na primeira curtida.
+builder.Services.AddOptions<VisitantesOptions>()
+    .Bind(builder.Configuration.GetSection("Visitantes"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+builder.Services.AddSingleton<HashVisitante>();
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
@@ -141,6 +186,9 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 var app = builder.Build();
+
+// Antes de tudo que lê IP ou esquema: reescreve RemoteIpAddress a partir do X-Forwarded-For.
+app.UseForwardedHeaders();
 
 app.UseExceptionHandler();
 

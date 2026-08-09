@@ -12,12 +12,12 @@ namespace PensaComigo.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/posts/{postId:guid}/curtidas")]
-public class CurtidasController(ISender mediator) : ControllerBase
+public class CurtidasController(ISender mediator, HashVisitante hash) : ControllerBase
 {
     [HttpPost]
     public async Task<IActionResult> Curtir(Guid postId, CancellationToken ct)
     {
-        await mediator.Send(new CurtirPostCommand(postId, HashVisitante.De(HttpContext)), ct);
+        await mediator.Send(new CurtirPostCommand(postId, hash.De(HttpContext)), ct);
 
         return NoContent();
     }
@@ -25,7 +25,7 @@ public class CurtidasController(ISender mediator) : ControllerBase
     [HttpDelete]
     public async Task<IActionResult> Descurtir(Guid postId, CancellationToken ct)
     {
-        await mediator.Send(new DescurtirPostCommand(postId, HashVisitante.De(HttpContext)), ct);
+        await mediator.Send(new DescurtirPostCommand(postId, hash.De(HttpContext)), ct);
 
         return NoContent();
     }
