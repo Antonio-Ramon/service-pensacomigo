@@ -102,6 +102,7 @@ dotnet user-secrets set "Jwt:Key" "<chave simétrica longa>"
 dotnet user-secrets set "Google:ClientId" "<client id do OAuth>"
 dotnet user-secrets set "Supabase:Url" "https://<projeto>.supabase.co"
 dotnet user-secrets set "Supabase:ServiceRoleKey" "<service role key>"
+dotnet user-secrets set "Visitantes:Pepper" "<segredo longo e aleatório>"
 ```
 
 | Chave | Para quê |
@@ -110,6 +111,8 @@ dotnet user-secrets set "Supabase:ServiceRoleKey" "<service role key>"
 | `Jwt:Issuer` / `Jwt:Audience` / `Jwt:Key` | Emissão e validação do JWT próprio. |
 | `Google:ClientId` | Audiência esperada no token do Google. |
 | `Supabase:Url` / `ServiceRoleKey` / `Bucket` | Upload de imagens. |
+| `Visitantes:Pepper` | Segredo do HMAC que identifica o leitor anônimo. Sem ele, curtir/comentar estoura. **Trocar o valor invalida os `viewer_hash` já gravados.** |
+| `ProxiesConfiaveis` | IPs ou CIDRs do proxy/ingress cujo `X-Forwarded-For` é aceito (`ProxiesConfiaveis__0=10.0.0.0/8` via env var). Vazio = header ignorado, correto em localhost. Atrás de proxy é obrigatório preencher: sem isso todo visitante colapsa numa identidade só. |
 
 ## Endpoints
 

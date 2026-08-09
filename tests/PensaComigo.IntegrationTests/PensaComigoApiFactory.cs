@@ -28,6 +28,13 @@ public sealed class PensaComigoApiFactory : WebApplicationFactory<Program>, IAsy
         builder.UseSetting("Jwt:Key", "chave-de-teste-com-mais-de-32-bytes-para-hs256!!");
         // SupabaseOptions é validada no start (ValidateOnStart) — sem isso a app nem sobe no teste.
         // Valores de fachada: quem chama o Supabase de verdade é trocado por fake em ImagensTests.
+        // Segredo do hash do visitante (HMAC), >= 32 chars pela validação de options.
+        builder.UseSetting("Visitantes:Pepper", "pepper-de-teste-com-32-caracteres!");
+        // Proxy confiável dos testes. O TestServer não define RemoteIpAddress (null), então o
+        // primeiro hop passa; quem quiser exercitar a allowlist define o IP de origem na mão
+        // (ver CurtidasTests.Forjar_x_forwarded_for_de_origem_nao_confiavel_nao_cria_visitante).
+        builder.UseSetting("ProxiesConfiaveis:0", "127.0.0.1");
+        builder.UseSetting("ProxiesConfiaveis:1", "10.0.0.0/8");
         builder.UseSetting("Supabase:Url", "https://teste.supabase.co");
         builder.UseSetting("Supabase:ServiceRoleKey", "chave-de-teste");
     }

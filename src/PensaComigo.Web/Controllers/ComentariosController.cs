@@ -17,14 +17,14 @@ namespace PensaComigo.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/posts/{postId:guid}/comentarios")]
-public class ComentariosController(ISender mediator) : ControllerBase
+public class ComentariosController(ISender mediator, HashVisitante hash) : ControllerBase
 {
     [HttpPost]
     public async Task<ActionResult<ComentarioResponse>> Criar(
         Guid postId, CriarComentarioRequest req, CancellationToken ct)
     {
         var command = new CriarComentarioCommand(
-            postId, req.ParentId, req.Autor, req.Conteudo, HashVisitante.De(HttpContext));
+            postId, req.ParentId, req.Autor, req.Conteudo, hash.De(HttpContext));
 
         return Ok(await mediator.Send(command, ct));
     }
