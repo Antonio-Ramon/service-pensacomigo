@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Gridify;
@@ -199,7 +199,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(ui => ui.EnableTryItOutByDefault());
 }
 
-app.UseHttpsRedirection();
+// Em dev o front (Node) rejeita o dev-cert self-signed: sem redirect, http://localhost:5001 serve direto.
+if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 // wwwroot/login.html: página de login servida pela própria API → mesma origem, sem CORS.
 app.UseStaticFiles();
 app.UseAuthentication();
