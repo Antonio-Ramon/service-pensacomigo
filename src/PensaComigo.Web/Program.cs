@@ -124,6 +124,15 @@ builder.Services.AddOptions<VisitantesOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<HashVisitante>();
 
+// Curtidas e comentarios sao chamados PELO BROWSER, nao pelo servidor do front: o viewer_hash
+// nasce do IP da conexao, e um proxy no front colapsaria todos os leitores num visitante so
+// (rate limit de comentario global, curtida de terceiro virando no-op). Dai o CORS.
+var origensFront = builder.Configuration.GetSection("OrigensFront").Get<string[]>() ?? [];
+builder.Services.AddCors(opcoes => opcoes.AddDefaultPolicy(p => p
+    .WithOrigins(origensFront)
+    .WithMethods("GET", "POST", "DELETE")
+    .WithHeaders("Content-Type")));
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
@@ -203,6 +212,7 @@ if (app.Environment.IsDevelopment())
 if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 // wwwroot/login.html: página de login servida pela própria API → mesma origem, sem CORS.
 app.UseStaticFiles();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
