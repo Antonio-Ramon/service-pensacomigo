@@ -16,6 +16,7 @@ public record PostDetalheResponse(
     DateTime DataCriacao,
     DateTime DataAtualizacao,
     AutorResponse Autor,
-    IReadOnlyList<TagResponse> Tags);
+    IReadOnlyList<TagResponse> Tags,
+    DateTime? DataPublicacao);
 
 public record AutorResponse(Guid Id, string Nome, string ImagemUrl);

@@ -10,8 +10,11 @@ public class AbrirPostCommandHandler(IPostRepository posts)
 {
     public async Task<PostDetalheResponse> Handle(AbrirPostCommand cmd, CancellationToken ct)
     {
-        var post = await posts.ObterPorSlugAsync(cmd.Slug, ct)
-                   ?? throw new NaoEncontradoException("Post", cmd.Slug);
+        var post = await posts.ObterPorSlugAsync(cmd.Slug, ct);
+
+        // Rascunho não existe para o público: 404, mesma semântica de "não é seu".
+        if (post is null || post.Status != Domain.Enums.StatusPost.Publicado)
+            throw new NaoEncontradoException("Post", cmd.Slug);
 
         // O UPDATE é atômico no banco (ver repo), então o valor que devolvemos é o de antes + 1.
         // ponytail: incremento cru, sem dedup por visitante — se virar métrica séria, deduplicar
@@ -24,6 +27,7 @@ public class AbrirPostCommandHandler(IPostRepository posts)
             post.TempoLeitura, post.QtdCurtidas, post.QtdVisualizacoes + 1,
             post.DataCriacao, post.DataAtualizacao,
             new AutorResponse(post.Autor.Id, post.Autor.Nome, post.Autor.ImagemUrl),
-            post.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList());
+            post.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList(),
+            post.DataPublicacao);
     }
 }

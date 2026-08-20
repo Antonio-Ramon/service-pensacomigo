@@ -22,16 +22,23 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         .AddMap("slug", p => p.Slug)
         .AddMap("autor", p => p.Autor.Nome)
         .AddMap("tag", p => p.Tags.Select(t => t.Slug))
-        .AddMap("dataCriacao", p => p.DataCriacao);
+        .AddMap("dataCriacao", p => p.DataCriacao)
+        .AddMap("dataPublicacao", p => p.DataPublicacao)
+        .AddMap("status", p => p.Status);
 
-    public async Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default)
+    public async Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, bool incluirRascunhos = false, CancellationToken ct = default)
     {
-        // Feed é cronológico: mais novo primeiro. Sem ordem explícita a paginação fica instável.
-        if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataCriacao desc";
+        // Feed ordena pela data de PUBLICAÇÃO: rascunho antigo publicado hoje sobe pro topo.
+        // ponytail: DESC no Postgres põe NULL (rascunho) primeiro na listagem do autor — aceitável.
+        if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataPublicacao desc";
+
+        var fonte = incluirRascunhos
+            ? db.Posts
+            : db.Posts.Where(p => p.Status == Domain.Enums.StatusPost.Publicado);
 
         // Autor e Tags entram no card do feed. ponytail: o Include traz o Conteudo (jsonb) junto
         // porque a entidade vem inteira — projetar colunas se o payload do feed pesar.
-        var (total, query) = await db.Posts.AsNoTracking()
+        var (total, query) = await fonte.AsNoTracking()
             .Include(p => p.Autor)
             .Include(p => p.Tags)
             .GridifyQueryableAsync(consulta, Mapper, ct);

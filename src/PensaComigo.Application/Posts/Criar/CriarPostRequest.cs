@@ -1,3 +1,4 @@
+using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.ValueObjects;
 
 namespace PensaComigo.Application.Posts.Criar;
@@ -11,4 +12,5 @@ public record CriarPostRequest(
     string Titulo,
     string ImagemCapa,
     List<Guid> TagIds,
-    List<Bloco> Conteudo);
+    List<Bloco> Conteudo,
+    StatusPost Status = StatusPost.Publicado);   // default preserva o contrato antigo: POST publica

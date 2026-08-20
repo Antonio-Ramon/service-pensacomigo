@@ -1,3 +1,4 @@
+using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.ValueObjects;
 
 namespace PensaComigo.Application.Posts;
@@ -12,4 +13,5 @@ public interface IPostEscrita
     string ImagemCapa { get; }
     List<Guid> TagIds { get; }
     List<Bloco> Conteudo { get; }
+    StatusPost Status { get; }
 }

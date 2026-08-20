@@ -1,5 +1,6 @@
 using MediatR;
 using PensaComigo.Application.Common;
+using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
 
@@ -31,6 +32,11 @@ public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags
         post.Conteudo = [.. cmd.Conteudo.OrderBy(b => b.Ordem)];
         post.TempoLeitura = CalculadoraTempoLeitura.Calcular(cmd.Conteudo);
         post.DataAtualizacao = DateTime.UtcNow;
+
+        post.Status = cmd.Status;
+        // DataPublicacao congela na PRIMEIRA publicação: republicar não reposiciona o post no feed.
+        if (cmd.Status == StatusPost.Publicado && post.DataPublicacao is null)
+            post.DataPublicacao = DateTime.UtcNow;
 
         // Trocar a coleção inteira: o EF compara com o que carregou e emite só o
         // delta em post_tags (DELETE das que saíram, INSERT das que entraram).

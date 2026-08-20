@@ -1,6 +1,7 @@
 using MediatR;
 using PensaComigo.Application.Common;
 using PensaComigo.Domain.Entities;
+using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
 
@@ -36,6 +37,9 @@ public class CriarPostCommandHandler(IPostRepository posts, ITagRepository tags)
             TempoLeitura = CalculadoraTempoLeitura.Calcular(cmd.Conteudo),
             AutorId = cmd.AutorId,
             Tags = vinculadas,
+            Status = cmd.Status,
+            // Publicar direto na criação já carimba a data que o feed ordena.
+            DataPublicacao = cmd.Status == StatusPost.Publicado ? DateTime.UtcNow : null,
         };
 
         await posts.AdicionarAsync(post, ct);

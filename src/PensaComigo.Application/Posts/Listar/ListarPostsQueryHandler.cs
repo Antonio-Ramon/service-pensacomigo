@@ -11,14 +11,15 @@ public class ListarPostsQueryHandler(IPostRepository posts)
 {
     public async Task<Pagina<PostResumoResponse>> Handle(ListarPostsQuery q, CancellationToken ct)
     {
-        var pagina = await posts.ListarAsync(q, ct);
+        var pagina = await posts.ListarAsync(q, q.IncluirRascunhos, ct);
 
         return new Pagina<PostResumoResponse>(
             pagina.Items.Select(p => new PostResumoResponse(
                 p.Id, p.Titulo, p.Slug, p.ImagemCapa,
                 p.TempoLeitura, p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao,
                 new AutorResponse(p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl),
-                p.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList())).ToList(),
+                p.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList(),
+                p.Status, p.DataPublicacao)).ToList(),
             pagina.TotalItems);
     }
 }

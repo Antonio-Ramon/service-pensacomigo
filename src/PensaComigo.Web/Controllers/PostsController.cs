@@ -20,12 +20,18 @@ namespace PensaComigo.Web.Controllers;
 [Route("api/v1/[controller]")]
 public class PostsController(ISender mediator) : ControllerBase
 {
-    /// <summary>Feed público. Filtro/ordem/página na querystring (Gridify).</summary>
+    /// <summary>Feed público (só publicados). Autor logado vê rascunhos também e pode
+    /// filtrar com <c>?filter=status=0</c>. Filtro/ordem/página na querystring (Gridify).</summary>
     [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<Pagina<PostResumoResponse>>> Listar(
-        [FromQuery] ListarPostsQuery query, CancellationToken ct) =>
-        Ok(await mediator.Send(query, ct));
+        [FromQuery] ListarPostsQuery query, CancellationToken ct)
+    {
+        // Sobrescreve SEMPRE, depois do binding: anônimo não vê rascunho nem pedindo na querystring.
+        query.IncluirRascunhos = User.Identity?.IsAuthenticated == true;
+
+        return Ok(await mediator.Send(query, ct));
+    }
 
     /// <summary>Abrir post pelo slug (público). Rota `{slug}` fica depois de `{id:guid}`
     /// nas escritas, mas não conflita: aquelas são PUT/DELETE.</summary>
@@ -37,7 +43,7 @@ public class PostsController(ISender mediator) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<PostResponse>> Criar(CriarPostRequest req, CancellationToken ct)
     {
-        var command = new CriarPostCommand(AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo);
+        var command = new CriarPostCommand(AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo, req.Status);
 
         return Ok(await mediator.Send(command, ct));
     }
@@ -45,7 +51,7 @@ public class PostsController(ISender mediator) : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PostResponse>> Editar(Guid id, EditarPostRequest req, CancellationToken ct)
     {
-        var command = new EditarPostCommand(id, AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo);
+        var command = new EditarPostCommand(id, AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo, req.Status);
 
         return Ok(await mediator.Send(command, ct));
     }

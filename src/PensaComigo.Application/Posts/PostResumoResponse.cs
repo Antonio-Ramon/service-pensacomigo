@@ -1,4 +1,5 @@
 using PensaComigo.Application.Tags;
+using PensaComigo.Domain.Enums;
 
 namespace PensaComigo.Application.Posts;
 
@@ -15,4 +16,6 @@ public record PostResumoResponse(
     int QtdVisualizacoes,
     DateTime DataCriacao,
     AutorResponse Autor,
-    IReadOnlyList<TagResponse> Tags);
+    IReadOnlyList<TagResponse> Tags,
+    StatusPost Status,
+    DateTime? DataPublicacao);   // null enquanto rascunho
