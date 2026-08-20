@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Gridify;
@@ -124,6 +124,15 @@ builder.Services.AddOptions<VisitantesOptions>()
     .ValidateOnStart();
 builder.Services.AddSingleton<HashVisitante>();
 
+// Curtidas e comentarios sao chamados PELO BROWSER, nao pelo servidor do front: o viewer_hash
+// nasce do IP da conexao, e um proxy no front colapsaria todos os leitores num visitante so
+// (rate limit de comentario global, curtida de terceiro virando no-op). Dai o CORS.
+var origensFront = builder.Configuration.GetSection("OrigensFront").Get<string[]>() ?? [];
+builder.Services.AddCors(opcoes => opcoes.AddDefaultPolicy(p => p
+    .WithOrigins(origensFront)
+    .WithMethods("GET", "POST", "DELETE")
+    .WithHeaders("Content-Type")));
+
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
@@ -199,9 +208,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI(ui => ui.EnableTryItOutByDefault());
 }
 
-app.UseHttpsRedirection();
+// Em dev o front (Node) rejeita o dev-cert self-signed: sem redirect, http://localhost:5001 serve direto.
+if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 // wwwroot/login.html: página de login servida pela própria API → mesma origem, sem CORS.
 app.UseStaticFiles();
+app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
