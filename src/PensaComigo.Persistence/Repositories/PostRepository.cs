@@ -23,7 +23,7 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         .AddMap("slug", p => p.Slug)
         .AddMap("autor", p => p.Autor.Nome)
         .AddMap("tag", p => p.Tags.Select(t => t.Slug))
-        .AddMap("mood", p => p.Moods)
+        .AddMap("mood", p => p.Moods.Select(m => m), v => Enum.Parse<Domain.Enums.Mood>(v, true))
         .AddMap("etapa", p => (int?)p.Etapa!.Numero)
         .AddMap("dataCriacao", p => p.DataCriacao)
         .AddMap("dataPublicacao", p => p.DataPublicacao)
