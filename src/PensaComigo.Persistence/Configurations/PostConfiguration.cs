@@ -22,11 +22,14 @@ public class PostConfiguration : IEntityTypeConfiguration<Post>
         builder.Property(p => p.QtdCurtidas).HasColumnName("qtd_curtidas").HasDefaultValue(0);
         builder.Property(p => p.QtdVisualizacoes).HasColumnName("qtd_visualizacoes").HasDefaultValue(0);
         builder.Property(p => p.AutorId).HasColumnName("autor_id");
+        builder.Property(p => p.Status).HasColumnName("status").HasDefaultValue(Domain.Enums.StatusPost.Rascunho);
+        builder.Property(p => p.DataPublicacao).HasColumnName("data_publicacao");
         builder.Property(p => p.DataCriacao).HasColumnName("data_criacao").HasDefaultValueSql("now()");
         builder.Property(p => p.DataAtualizacao).HasColumnName("data_atualizacao").HasDefaultValueSql("now()");
 
         builder.HasIndex(p => p.Slug).IsUnique();
         builder.HasIndex(p => p.DataCriacao);
+        builder.HasIndex(p => p.DataPublicacao);   // ordem padrão do feed
 
         // Fatia 2 aprofunda: List<Bloco> serializado como coluna jsonb (blob).
         // ValueComparer garante que o EF detecte mutação dentro da lista.

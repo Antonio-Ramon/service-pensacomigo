@@ -204,7 +204,10 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
         var pagina = await resp.Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
 
         Assert.Equal(1, pagina!.TotalItems);
-        Assert.Equal(meu.Id, Assert.Single(pagina.Items).Id);
+        var item = Assert.Single(pagina.Items);
+        Assert.Equal(meu.Id, item.Id);
+        Assert.Equal("Antonio Ramon", item.Autor.Nome);   // card da home: autor + tags no resumo
+        Assert.Equal(tag, Assert.Single(item.Tags).Id);
     }
 
     [Fact]
@@ -231,11 +234,62 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
         return await db.Tags.AsNoTracking().FirstAsync(t => t.Nome == nome);
     }
 
+    [Fact]
+    public async Task Rascunho_nao_aparece_no_feed_anonimo_nem_abre_por_slug()
+    {
+        var autor = await ClienteAutenticadoAsync();
+        var marca = $"{Guid.NewGuid():N}";
+        var rascunho = await CriarPostAsync(autor, $"Rascunho {marca}", status: 0);
+
+        var anonimo = factory.CreateClient();
+
+        var feed = await (await anonimo.GetAsync($"/api/v1/posts?filter=titulo=*{marca}"))
+            .Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
+        Assert.Equal(0, feed!.TotalItems);
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await anonimo.GetAsync($"/api/v1/posts/{rascunho.Slug}")).StatusCode);
+
+        // Autor logado vê o rascunho na listagem, com o status no DTO.
+        var doAutor = await (await autor.GetAsync($"/api/v1/posts?filter=titulo=*{marca}"))
+            .Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
+        var item = Assert.Single(doAutor!.Items);
+        Assert.Equal(Domain.Enums.StatusPost.Rascunho, item.Status);
+        Assert.Null(item.DataPublicacao);
+    }
+
+    [Fact]
+    public async Task Publicar_rascunho_carimba_DataPublicacao_e_republicar_nao_muda()
+    {
+        var autor = await ClienteAutenticadoAsync();
+        var rascunho = await CriarPostAsync(autor, $"Publicar depois {Guid.NewGuid():N}", status: 0);
+
+        var corpo = new
+        {
+            titulo = "Publicado agora",
+            imagemCapa = "posts/capa.webp",
+            tagIds = Array.Empty<Guid>(),
+            conteudo = new object[] { new { tipo = TipoBloco.Texto, ordem = 1, html = Texto(10) } },
+            status = 1,
+        };
+        (await autor.PutAsJsonAsync($"/api/v1/posts/{rascunho.Id}", corpo)).EnsureSuccessStatusCode();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
+        var publicadoEm = (await db.Posts.AsNoTracking().FirstAsync(p => p.Id == rascunho.Id)).DataPublicacao;
+        Assert.NotNull(publicadoEm);
+
+        // Republicar (novo PUT com status=1) não reposiciona o post no feed.
+        (await autor.PutAsJsonAsync($"/api/v1/posts/{rascunho.Id}", corpo)).EnsureSuccessStatusCode();
+        var depois = (await db.Posts.AsNoTracking().FirstAsync(p => p.Id == rascunho.Id)).DataPublicacao;
+        Assert.Equal(publicadoEm, depois);
+    }
+
     private static string Texto(int palavras) =>
         "<p>" + string.Join(" ", Enumerable.Repeat("palavra", palavras)) + "</p>";
 
     private static async Task<PostResponse> CriarPostAsync(
-        HttpClient client, string titulo, Guid? tagId = null, int palavras = 10)
+        HttpClient client, string titulo, Guid? tagId = null, int palavras = 10, int status = 1)
     {
         var resp = await client.PostAsJsonAsync("/api/v1/posts", new
         {
@@ -243,6 +297,7 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
             imagemCapa = "posts/capa.webp",
             tagIds = tagId is null ? Array.Empty<Guid>() : [tagId.Value],
             conteudo = new object[] { new { tipo = TipoBloco.Texto, ordem = 1, html = Texto(palavras) } },
+            status,
         });
 
         resp.EnsureSuccessStatusCode();

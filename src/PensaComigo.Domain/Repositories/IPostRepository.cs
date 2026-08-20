@@ -12,7 +12,7 @@ public interface IPostRepository
     Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Feed paginado/filtrado/ordenado pela querystring (Gridify, Fatia 13).</summary>
-    Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default);
+    Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, bool incluirRascunhos = false, CancellationToken ct = default);
 
     /// <summary>Post para leitura pública: sem tracking, com Autor e Tags.</summary>
     Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default);

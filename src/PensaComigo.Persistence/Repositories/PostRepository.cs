@@ -22,15 +22,44 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         .AddMap("slug", p => p.Slug)
         .AddMap("autor", p => p.Autor.Nome)
         .AddMap("tag", p => p.Tags.Select(t => t.Slug))
-        .AddMap("dataCriacao", p => p.DataCriacao);
+        .AddMap("dataCriacao", p => p.DataCriacao)
+        .AddMap("dataPublicacao", p => p.DataPublicacao)
+        .AddMap("status", p => p.Status);
 
-    public async Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default)
+    public async Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, bool incluirRascunhos = false, CancellationToken ct = default)
     {
-        // Feed é cronológico: mais novo primeiro. Sem ordem explícita a paginação fica instável.
-        if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataCriacao desc";
+        // Feed ordena pela data de PUBLICAÇÃO: rascunho antigo publicado hoje sobe pro topo.
+        // ponytail: DESC no Postgres põe NULL (rascunho) primeiro na listagem do autor — aceitável.
+        if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataPublicacao desc";
 
-        var (total, query) = await db.Posts.AsNoTracking().GridifyQueryableAsync(consulta, Mapper, ct);
-        return new Pagina<Post>(await query.ToListAsync(ct), total);
+        var fonte = incluirRascunhos
+            ? db.Posts
+            : db.Posts.Where(p => p.Status == Domain.Enums.StatusPost.Publicado);
+
+        var (total, query) = await fonte.AsNoTracking().GridifyQueryableAsync(consulta, Mapper, ct);
+
+        // Projeção explícita (sem o Conteudo jsonb — issue #19): 20 posts por página com o corpo
+        // junto seria payload absurdo. EF não projeta direto em entidade, daí o shape anônimo
+        // no SQL e a remontagem do Post em memória.
+        var linhas = await query.Select(p => new
+        {
+            p.Id, p.Titulo, p.Slug, p.ImagemCapa, p.TempoLeitura,
+            p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao, p.Status, p.DataPublicacao,
+            Autor = new { p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl },
+            Tags = p.Tags.Select(t => new { t.Id, t.Nome, t.Slug }).ToList(),
+        }).ToListAsync(ct);
+
+        var itens = linhas.Select(l => new Post
+        {
+            Id = l.Id, Titulo = l.Titulo, Slug = l.Slug, ImagemCapa = l.ImagemCapa,
+            TempoLeitura = l.TempoLeitura, QtdCurtidas = l.QtdCurtidas,
+            QtdVisualizacoes = l.QtdVisualizacoes, DataCriacao = l.DataCriacao,
+            Status = l.Status, DataPublicacao = l.DataPublicacao,
+            Autor = new Usuario { Id = l.Autor.Id, Nome = l.Autor.Nome, ImagemUrl = l.Autor.ImagemUrl },
+            Tags = l.Tags.Select(t => new Tag { Id = t.Id, Nome = t.Nome, Slug = t.Slug }).ToList(),
+        }).ToList();
+
+        return new Pagina<Post>(itens, total);
     }
 
     public Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default) =>

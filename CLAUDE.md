@@ -22,7 +22,7 @@ Stack: **.NET 10**, EF Core 10 + Npgsql (PostgreSQL), MediatR 14, FluentValidati
 
 ### Issue tracker
 
-Issues e specs vivem como markdown em `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Issues e specs vivem como GitHub Issues (`gh` CLI) em `Antonio-Ramon/service-pensacomigo`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -7,3 +7,6 @@ obj/
 .claude/
 _bmad/
 _bmad-output/
+
+bash.exe.stackdump
+_bmad-output/

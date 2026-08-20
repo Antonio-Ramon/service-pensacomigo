@@ -1,4 +1,5 @@
-﻿using PensaComigo.Domain.ValueObjects;
+﻿using PensaComigo.Domain.Enums;
+using PensaComigo.Domain.ValueObjects;
 
 namespace PensaComigo.Domain.Entities;
 
@@ -18,6 +19,11 @@ public class Post
 
     public Guid AutorId { get; set; }
     public Usuario Autor { get; set; } = null!;
+
+    public StatusPost Status { get; set; }
+
+    // Congela na PRIMEIRA publicação (republicar não muda) — é a data que o feed ordena.
+    public DateTime? DataPublicacao { get; set; }
 
     public DateTime DataCriacao { get; set; }
     public DateTime DataAtualizacao { get; set; }

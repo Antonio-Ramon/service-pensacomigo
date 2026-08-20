@@ -31,6 +31,9 @@ public abstract class PostEscritaValidator<T> : AbstractValidator<T> where T : I
         RuleFor(c => c.TagIds)
             .NotNull().WithMessage("Informe as tags do post (lista vazia se não houver).");
 
+        RuleFor(c => c.Status)
+            .IsInEnum().WithMessage("Status inválido: 0 (Rascunho) ou 1 (Publicado).");
+
         // RuleForEach: a mesma regra em cada item da lista, com índice no erro (Conteudo[2]).
         RuleForEach(c => c.Conteudo)
             .Must(Coerente)
