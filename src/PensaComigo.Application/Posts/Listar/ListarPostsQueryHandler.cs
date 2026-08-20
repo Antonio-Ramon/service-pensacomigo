@@ -1,4 +1,5 @@
 using MediatR;
+using PensaComigo.Application.Tags;
 using PensaComigo.Domain.Common;
 using PensaComigo.Domain.Repositories;
 
@@ -15,7 +16,9 @@ public class ListarPostsQueryHandler(IPostRepository posts)
         return new Pagina<PostResumoResponse>(
             pagina.Items.Select(p => new PostResumoResponse(
                 p.Id, p.Titulo, p.Slug, p.ImagemCapa,
-                p.TempoLeitura, p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao)).ToList(),
+                p.TempoLeitura, p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao,
+                new AutorResponse(p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl),
+                p.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList())).ToList(),
             pagina.TotalItems);
     }
 }

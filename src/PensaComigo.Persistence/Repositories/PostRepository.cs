@@ -29,7 +29,12 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         // Feed é cronológico: mais novo primeiro. Sem ordem explícita a paginação fica instável.
         if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataCriacao desc";
 
-        var (total, query) = await db.Posts.AsNoTracking().GridifyQueryableAsync(consulta, Mapper, ct);
+        // Autor e Tags entram no card do feed. ponytail: o Include traz o Conteudo (jsonb) junto
+        // porque a entidade vem inteira — projetar colunas se o payload do feed pesar.
+        var (total, query) = await db.Posts.AsNoTracking()
+            .Include(p => p.Autor)
+            .Include(p => p.Tags)
+            .GridifyQueryableAsync(consulta, Mapper, ct);
         return new Pagina<Post>(await query.ToListAsync(ct), total);
     }
 

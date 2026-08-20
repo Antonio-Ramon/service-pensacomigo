@@ -204,7 +204,10 @@ public class PostsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComi
         var pagina = await resp.Content.ReadFromJsonAsync<Pagina<PostResumoResponse>>();
 
         Assert.Equal(1, pagina!.TotalItems);
-        Assert.Equal(meu.Id, Assert.Single(pagina.Items).Id);
+        var item = Assert.Single(pagina.Items);
+        Assert.Equal(meu.Id, item.Id);
+        Assert.Equal("Antonio Ramon", item.Autor.Nome);   // card da home: autor + tags no resumo
+        Assert.Equal(tag, Assert.Single(item.Tags).Id);
     }
 
     [Fact]
