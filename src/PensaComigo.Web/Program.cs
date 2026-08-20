@@ -62,6 +62,8 @@ builder.Services.AddPersistence(builder.Configuration);
 // Impls dos seams de auth (Fatia 10). Ficam no host: dependem de config e de libs externas
 // que a Application não pode conhecer. O teste de integração troca IGoogleTokenValidator por fake.
 builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
+// Troca do code pelo id_token no fluxo conduzido pelo backend (issue #17).
+builder.Services.AddHttpClient<IGoogleCodeExchanger, GoogleCodeExchanger>();
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
 // Storage (Fatia 14). Options pattern: seção tipada + validada NA SUBIDA — sem ServiceRoleKey
@@ -130,8 +132,10 @@ builder.Services.AddSingleton<HashVisitante>();
 var origensFront = builder.Configuration.GetSection("OrigensFront").Get<string[]>() ?? [];
 builder.Services.AddCors(opcoes => opcoes.AddDefaultPolicy(p => p
     .WithOrigins(origensFront)
-    .WithMethods("GET", "POST", "DELETE")
-    .WithHeaders("Content-Type")));
+    .WithMethods("GET", "POST", "PUT", "DELETE")
+    .WithHeaders("Content-Type")
+    // A sessão do admin é cookie httpOnly (issue #17): sem credenciais o browser não o envia.
+    .AllowCredentials()));
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -159,6 +163,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         // e o padrão é 401 com corpo VAZIO. Aqui ele passa a falar o mesmo envelope dos demais.
         options.Events = new JwtBearerEvents
         {
+            // Sessão por cookie (issue #17): sem Authorization no header, o MESMO JWT é lido
+            // do cookie httpOnly emitido no callback do Google. Header, quando presente, ganha.
+            OnMessageReceived = contexto =>
+            {
+                if (string.IsNullOrEmpty(contexto.Request.Headers.Authorization))
+                    contexto.Token = contexto.Request.Cookies[PensaComigo.Web.Controllers.AuthController.CookieSessao];
+                return Task.CompletedTask;
+            },
             OnChallenge = async contexto =>
             {
                 contexto.HandleResponse();   // cancela a resposta padrão do handler
