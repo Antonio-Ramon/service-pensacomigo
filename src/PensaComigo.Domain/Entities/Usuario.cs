@@ -12,6 +12,9 @@ public class Usuario
     // Foto puxada da conta Google
     public string ImagemUrl { get; set; } = null!;
 
+    // Bio exibida no "Quem escreve" da home e no rodapé do post (issue #22)
+    public string? Bio { get; set; }
+
     // Expansível: novos autores além de Antonio e Jéssica
     public bool IsAdmin { get; set; } = true;
 

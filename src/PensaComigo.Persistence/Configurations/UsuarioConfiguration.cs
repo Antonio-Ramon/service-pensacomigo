@@ -16,6 +16,7 @@ public class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
         builder.Property(u => u.Email).HasColumnName("email").IsRequired();
         builder.Property(u => u.GoogleId).HasColumnName("google_id");
         builder.Property(u => u.ImagemUrl).HasColumnName("imagem_url").IsRequired();
+        builder.Property(u => u.Bio).HasColumnName("bio");
         builder.Property(u => u.IsAdmin).HasColumnName("is_admin").HasDefaultValue(false);
         builder.Property(u => u.DataCriacao).HasColumnName("data_criacao").HasDefaultValueSql("now()");
 
@@ -36,6 +37,7 @@ public class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
                 Nome = "Antonio Ramon",
                 Email = "ar7339347@gmail.com",
                 ImagemUrl = "",
+                Bio = "Escreve em Pensa Comigo sobre fé que se pensa — meditações que se aproximam de pregações escritas.",
                 IsAdmin = true,
                 DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             },
@@ -45,6 +47,7 @@ public class UsuarioConfiguration : IEntityTypeConfiguration<Usuario>
                 Nome = "Jessica Rose",
                 Email = "jessicarosesc@gmail.com",
                 ImagemUrl = "",
+                Bio = "Escreve em Pensa Comigo meditações reflexivas — a fé que te obriga a pensar.",
                 IsAdmin = true,
                 DataCriacao = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
             });
