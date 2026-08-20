@@ -14,4 +14,9 @@ public interface ITagRepository
     /// gravar só as linhas de junção do N:N, sem tentar reinserir a tag.</summary>
     Task<List<Tag>> ObterPorIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default);
     Task AdicionarAsync(Tag tag, CancellationToken ct = default);
+
+    /// <summary>Quantos posts usam a tag — insumo do bloqueio de exclusão (issue #32).</summary>
+    Task<int> ContarPostsAsync(Guid id, CancellationToken ct = default);
+
+    void Remover(Tag tag);
 }

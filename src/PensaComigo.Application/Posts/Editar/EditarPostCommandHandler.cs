@@ -11,7 +11,7 @@ namespace PensaComigo.Application.Posts.Editar;
 /// o change tracker (Fatia 16) monta o UPDATE e o UnitOfWorkBehavior commita.
 /// Slug não entra: congelou na criação.
 /// </summary>
-public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags)
+public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags, IEtapaRepository etapas)
     : IRequestHandler<EditarPostCommand, PostResponse>
 {
     public async Task<PostResponse> Handle(EditarPostCommand cmd, CancellationToken ct)
@@ -27,19 +27,28 @@ public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags
         if (faltando.Count > 0)
             throw new NaoEncontradoException("Tag", string.Join(", ", faltando));
 
+        if (cmd.EtapaId is Guid etapaId && !await etapas.ExistePorIdAsync(etapaId, ct))
+            throw new NaoEncontradoException("Etapa", etapaId);
+
         // Fronteira de confiança: HTML dos blocos Texto passa pela whitelist antes de persistir.
         SanitizadorHtml.SanitizarBlocos(cmd.Conteudo);
 
         post.Titulo = cmd.Titulo.Trim();
+        post.Dek = string.IsNullOrWhiteSpace(cmd.Dek) ? null : cmd.Dek.Trim();
         post.ImagemCapa = cmd.ImagemCapa;
         post.Conteudo = [.. cmd.Conteudo.OrderBy(b => b.Ordem)];
         post.TempoLeitura = CalculadoraTempoLeitura.Calcular(cmd.Conteudo);
+        post.Moods = [.. cmd.Moods.Distinct()];
+        post.EtapaId = cmd.EtapaId;
         post.DataAtualizacao = DateTime.UtcNow;
 
         post.Status = cmd.Status;
         // DataPublicacao congela na PRIMEIRA publicação: republicar não reposiciona o post no feed.
-        if (cmd.Status == StatusPost.Publicado && post.DataPublicacao is null)
+        // Publicar um agendado ainda futuro carimba agora (a data agendada nunca chegou a valer).
+        if (cmd.Status == StatusPost.Publicado && (post.DataPublicacao is null || post.DataPublicacao > DateTime.UtcNow))
             post.DataPublicacao = DateTime.UtcNow;
+        else if (cmd.Status == StatusPost.Agendado)
+            post.DataPublicacao = cmd.DataPublicacao;
 
         // Trocar a coleção inteira: o EF compara com o que carregou e emite só o
         // delta em post_tags (DELETE das que saíram, INSERT das que entraram).

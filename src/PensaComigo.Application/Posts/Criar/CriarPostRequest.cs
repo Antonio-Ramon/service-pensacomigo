@@ -13,4 +13,8 @@ public record CriarPostRequest(
     string ImagemCapa,
     List<Guid> TagIds,
     List<Bloco> Conteudo,
-    StatusPost Status = StatusPost.Publicado);   // default preserva o contrato antigo: POST publica
+    StatusPost Status = StatusPost.Publicado,   // default preserva o contrato antigo: POST publica
+    string? Dek = null,
+    List<Mood>? Moods = null,                   // null vira lista vazia no controller
+    Guid? EtapaId = null,
+    DateTime? DataPublicacao = null);           // só usada com Status=Agendado

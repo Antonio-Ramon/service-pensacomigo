@@ -9,6 +9,16 @@ public class Post
     public string Titulo { get; set; } = null!;
     public string Slug { get; set; } = null!;
 
+    /// <summary>Subtítulo curto (dek): frase abaixo do título, sem entregar a conclusão.</summary>
+    public string? Dek { get; set; }
+
+    /// <summary>Estados de chegada que a meditação atende — persistido como integer[].</summary>
+    public List<Mood> Moods { get; set; } = [];
+
+    // Etapa da trilha de leitura (opcional)
+    public Guid? EtapaId { get; set; }
+    public Etapa? Etapa { get; set; }
+
     // Array de blocos, persistido como jsonb (complex type do EF 10)
     public List<Bloco> Conteudo { get; set; } = [];
 

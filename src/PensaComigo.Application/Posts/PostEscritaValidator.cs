@@ -31,8 +31,23 @@ public abstract class PostEscritaValidator<T> : AbstractValidator<T> where T : I
         RuleFor(c => c.TagIds)
             .NotNull().WithMessage("Informe as tags do post (lista vazia se não houver).");
 
+        RuleFor(c => c.Dek)
+            .MaximumLength(200).WithMessage("O dek tem no máximo 200 caracteres.");
+
+        RuleFor(c => c.Moods)
+            .NotNull().WithMessage("Informe os moods do post (lista vazia se não houver).");
+
+        RuleForEach(c => c.Moods)
+            .IsInEnum().WithMessage("Mood inválido.");
+
         RuleFor(c => c.Status)
-            .IsInEnum().WithMessage("Status inválido: 0 (Rascunho) ou 1 (Publicado).");
+            .IsInEnum().WithMessage("Status inválido: 0 (Rascunho), 1 (Publicado) ou 2 (Agendado).");
+
+        // Agendar sem data (ou com data passada) é um post que nunca entra no ar.
+        RuleFor(c => c.DataPublicacao)
+            .NotNull().WithMessage("Post agendado exige DataPublicacao.")
+            .GreaterThan(_ => DateTime.UtcNow).WithMessage("DataPublicacao do agendamento precisa ser futura.")
+            .When(c => c.Status == StatusPost.Agendado);
 
         // RuleForEach: a mesma regra em cada item da lista, com índice no erro (Conteudo[2]).
         RuleForEach(c => c.Conteudo)

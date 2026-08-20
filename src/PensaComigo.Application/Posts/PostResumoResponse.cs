@@ -1,3 +1,4 @@
+using PensaComigo.Application.Etapas;
 using PensaComigo.Application.Tags;
 using PensaComigo.Domain.Enums;
 
@@ -9,6 +10,7 @@ namespace PensaComigo.Application.Posts;
 public record PostResumoResponse(
     Guid Id,
     string Titulo,
+    string? Dek,
     string Slug,
     string ImagemCapa,
     int TempoLeitura,
@@ -18,4 +20,6 @@ public record PostResumoResponse(
     AutorResponse Autor,
     IReadOnlyList<TagResponse> Tags,
     StatusPost Status,
-    DateTime? DataPublicacao);   // null enquanto rascunho
+    DateTime? DataPublicacao,    // null enquanto rascunho
+    IReadOnlyList<Mood> Moods,
+    EtapaResponse? Etapa);

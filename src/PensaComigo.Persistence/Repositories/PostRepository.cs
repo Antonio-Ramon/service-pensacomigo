@@ -18,10 +18,13 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
     /// <summary>Whitelist do feed. `tag` filtra pela coleção (vira EXISTS na junção);
     /// nada fora daqui é filtrável, por mais que o cliente peça.</summary>
     private static readonly IGridifyMapper<Post> Mapper = new GridifyMapper<Post>()
-        .AddMap("titulo", p => p.Titulo)
+        // unaccent() na coluna + termo sem acento no C#: "oracao" acha "oração" (issue #30).
+        .AddMap("titulo", p => EF.Functions.Unaccent(p.Titulo), v => Textos.RemoverAcentos(v))
         .AddMap("slug", p => p.Slug)
         .AddMap("autor", p => p.Autor.Nome)
         .AddMap("tag", p => p.Tags.Select(t => t.Slug))
+        .AddMap("mood", p => p.Moods)
+        .AddMap("etapa", p => (int?)p.Etapa!.Numero)
         .AddMap("dataCriacao", p => p.DataCriacao)
         .AddMap("dataPublicacao", p => p.DataPublicacao)
         .AddMap("status", p => p.Status);
@@ -32,9 +35,13 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         // ponytail: DESC no Postgres põe NULL (rascunho) primeiro na listagem do autor — aceitável.
         if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataPublicacao desc";
 
+        // Público vê publicado E agendado cuja hora já chegou — publicação resolvida na
+        // consulta, sem job de fundo (issue #29).
+        var agora = DateTime.UtcNow;
         var fonte = incluirRascunhos
             ? db.Posts
-            : db.Posts.Where(p => p.Status == Domain.Enums.StatusPost.Publicado);
+            : db.Posts.Where(p => p.Status == Domain.Enums.StatusPost.Publicado ||
+                                  (p.Status == Domain.Enums.StatusPost.Agendado && p.DataPublicacao <= agora));
 
         var (total, query) = await fonte.AsNoTracking().GridifyQueryableAsync(consulta, Mapper, ct);
 
@@ -43,18 +50,20 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         // no SQL e a remontagem do Post em memória.
         var linhas = await query.Select(p => new
         {
-            p.Id, p.Titulo, p.Slug, p.ImagemCapa, p.TempoLeitura,
+            p.Id, p.Titulo, p.Dek, p.Slug, p.ImagemCapa, p.TempoLeitura,
             p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao, p.Status, p.DataPublicacao,
+            p.Moods, p.Etapa,
             Autor = new { p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl },
             Tags = p.Tags.Select(t => new { t.Id, t.Nome, t.Slug }).ToList(),
         }).ToListAsync(ct);
 
         var itens = linhas.Select(l => new Post
         {
-            Id = l.Id, Titulo = l.Titulo, Slug = l.Slug, ImagemCapa = l.ImagemCapa,
+            Id = l.Id, Titulo = l.Titulo, Dek = l.Dek, Slug = l.Slug, ImagemCapa = l.ImagemCapa,
             TempoLeitura = l.TempoLeitura, QtdCurtidas = l.QtdCurtidas,
             QtdVisualizacoes = l.QtdVisualizacoes, DataCriacao = l.DataCriacao,
             Status = l.Status, DataPublicacao = l.DataPublicacao,
+            Moods = l.Moods, Etapa = l.Etapa,
             Autor = new Usuario { Id = l.Autor.Id, Nome = l.Autor.Nome, ImagemUrl = l.Autor.ImagemUrl },
             Tags = l.Tags.Select(t => new Tag { Id = t.Id, Nome = t.Nome, Slug = t.Slug }).ToList(),
         }).ToList();
@@ -66,7 +75,15 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         db.Posts.AsNoTracking()
                 .Include(p => p.Autor)
                 .Include(p => p.Tags)
+                .Include(p => p.Etapa)
                 .FirstOrDefaultAsync(p => p.Slug == slug, ct);
+
+    public Task<Post?> ObterDetalhePorIdAsync(Guid id, CancellationToken ct = default) =>
+        db.Posts.AsNoTracking()
+                .Include(p => p.Autor)
+                .Include(p => p.Tags)
+                .Include(p => p.Etapa)
+                .FirstOrDefaultAsync(p => p.Id == id, ct);
 
     // UPDATE ... SET qtd_visualizacoes = qtd_visualizacoes + 1 direto no banco.
     // Ler-somar-gravar pelo change tracker perderia contagem com dois leitores simultâneos.

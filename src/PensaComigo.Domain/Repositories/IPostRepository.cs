@@ -17,6 +17,10 @@ public interface IPostRepository
     /// <summary>Post para leitura pública: sem tracking, com Autor e Tags.</summary>
     Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default);
 
+    /// <summary>Detalhe por id para o editor do autor: sem tracking, com Autor, Tags e Etapa.
+    /// Não incrementa visualizações — esse é o motivo de existir (issue #29).</summary>
+    Task<Post?> ObterDetalhePorIdAsync(Guid id, CancellationToken ct = default);
+
     /// <summary>Incremento atômico do contador de visualizações.</summary>
     Task IncrementarVisualizacoesAsync(Guid id, CancellationToken ct = default);
 

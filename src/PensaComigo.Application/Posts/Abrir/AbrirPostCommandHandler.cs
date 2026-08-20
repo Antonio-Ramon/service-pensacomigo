@@ -12,22 +12,28 @@ public class AbrirPostCommandHandler(IPostRepository posts)
     {
         var post = await posts.ObterPorSlugAsync(cmd.Slug, ct);
 
-        // Rascunho não existe para o público: 404, mesma semântica de "não é seu".
-        if (post is null || post.Status != Domain.Enums.StatusPost.Publicado)
+        // Rascunho (e agendado ainda futuro) não existe para o público: 404, mesma
+        // semântica de "não é seu". Agendado vencido está no ar — sem job, resolvido aqui.
+        var noAr = post is not null &&
+                   (post.Status == Domain.Enums.StatusPost.Publicado ||
+                    (post.Status == Domain.Enums.StatusPost.Agendado && post.DataPublicacao <= DateTime.UtcNow));
+        if (!noAr)
             throw new NaoEncontradoException("Post", cmd.Slug);
 
         // O UPDATE é atômico no banco (ver repo), então o valor que devolvemos é o de antes + 1.
         // ponytail: incremento cru, sem dedup por visitante — se virar métrica séria, deduplicar
         // por viewer_hash como nos likes.
-        await posts.IncrementarVisualizacoesAsync(post.Id, ct);
+        await posts.IncrementarVisualizacoesAsync(post!.Id, ct);
 
         return new PostDetalheResponse(
-            post.Id, post.Titulo, post.Slug, post.ImagemCapa,
+            post.Id, post.Titulo, post.Dek, post.Slug, post.ImagemCapa,
             post.Conteudo.OrderBy(b => b.Ordem).ToList(),
             post.TempoLeitura, post.QtdCurtidas, post.QtdVisualizacoes + 1,
             post.DataCriacao, post.DataAtualizacao,
             new AutorResponse(post.Autor.Id, post.Autor.Nome, post.Autor.ImagemUrl, post.Autor.Bio),
             post.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList(),
-            post.DataPublicacao);
+            post.DataPublicacao,
+            post.Moods,
+            post.Etapa is null ? null : Etapas.EtapaResponse.De(post.Etapa));
     }
 }

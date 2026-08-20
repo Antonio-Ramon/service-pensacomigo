@@ -16,6 +16,10 @@ public class PostConfiguration : IEntityTypeConfiguration<Post>
 
         builder.Property(p => p.Id).HasColumnName("id");
         builder.Property(p => p.Titulo).HasColumnName("titulo").IsRequired();
+        builder.Property(p => p.Dek).HasColumnName("dek").HasMaxLength(200);
+        // Npgsql mapeia List<enum> para integer[] nativo — filtrável com = ANY(moods).
+        builder.Property(p => p.Moods).HasColumnName("moods");
+        builder.Property(p => p.EtapaId).HasColumnName("etapa_id");
         builder.Property(p => p.Slug).HasColumnName("slug").IsRequired();
         builder.Property(p => p.ImagemCapa).HasColumnName("imagem_capa").IsRequired();
         builder.Property(p => p.TempoLeitura).HasColumnName("tempo_leitura").HasDefaultValue(0);
@@ -46,6 +50,12 @@ public class PostConfiguration : IEntityTypeConfiguration<Post>
                    v => JsonSerializer.Serialize(v, opts),
                    v => JsonSerializer.Deserialize<List<Bloco>>(v, opts) ?? new List<Bloco>())
                .Metadata.SetValueComparer(comparer);
+
+        // Etapa é catálogo: apagar etapa em uso é bloqueado pelo banco (Restrict).
+        builder.HasOne(p => p.Etapa)
+               .WithMany()
+               .HasForeignKey(p => p.EtapaId)
+               .OnDelete(DeleteBehavior.Restrict);
 
         // N:N com Tag → tabela de junção post_tags
         builder.HasMany(p => p.Tags)

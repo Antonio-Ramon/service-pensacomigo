@@ -13,4 +13,8 @@ public record EditarPostRequest(
     string ImagemCapa,
     List<Guid> TagIds,
     List<Bloco> Conteudo,
-    StatusPost Status = StatusPost.Publicado);   // default preserva o contrato antigo
+    StatusPost Status = StatusPost.Publicado,   // default preserva o contrato antigo
+    string? Dek = null,
+    List<Mood>? Moods = null,
+    Guid? EtapaId = null,
+    DateTime? DataPublicacao = null);           // só usada com Status=Agendado

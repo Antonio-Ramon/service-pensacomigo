@@ -19,9 +19,13 @@ public class PensaComigoDbContext : DbContext, IUnitOfWork
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<Comentario> Comentarios => Set<Comentario>();
     public DbSet<Like> Likes => Set<Like>();
+    public DbSet<Etapa> Etapas => Set<Etapa>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // Busca insensível a acento (issue #30): unaccent() nos maps do Gridify.
+        modelBuilder.HasPostgresExtension("unaccent");
+
         // Aplica toda IEntityTypeConfiguration da pasta Configurations automaticamente
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(PensaComigoDbContext).Assembly);
     }

@@ -15,11 +15,13 @@ public class ListarPostsQueryHandler(IPostRepository posts)
 
         return new Pagina<PostResumoResponse>(
             pagina.Items.Select(p => new PostResumoResponse(
-                p.Id, p.Titulo, p.Slug, p.ImagemCapa,
+                p.Id, p.Titulo, p.Dek, p.Slug, p.ImagemCapa,
                 p.TempoLeitura, p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao,
                 new AutorResponse(p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl),
                 p.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList(),
-                p.Status, p.DataPublicacao)).ToList(),
+                p.Status, p.DataPublicacao,
+                p.Moods,
+                p.Etapa is null ? null : Etapas.EtapaResponse.De(p.Etapa))).ToList(),
             pagina.TotalItems);
     }
 }
