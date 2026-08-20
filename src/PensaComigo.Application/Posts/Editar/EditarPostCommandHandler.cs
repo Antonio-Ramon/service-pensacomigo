@@ -27,6 +27,9 @@ public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags
         if (faltando.Count > 0)
             throw new NaoEncontradoException("Tag", string.Join(", ", faltando));
 
+        // Fronteira de confiança: HTML dos blocos Texto passa pela whitelist antes de persistir.
+        SanitizadorHtml.SanitizarBlocos(cmd.Conteudo);
+
         post.Titulo = cmd.Titulo.Trim();
         post.ImagemCapa = cmd.ImagemCapa;
         post.Conteudo = [.. cmd.Conteudo.OrderBy(b => b.Ordem)];
