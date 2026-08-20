@@ -11,11 +11,13 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using PensaComigo.Application;
 using PensaComigo.Application.Auth;
+using PensaComigo.Application.Links;
 using PensaComigo.Application.Storage;
 using PensaComigo.Persistence;
 using PensaComigo.Shared.Erros;
 using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
+using PensaComigo.Web.Links;
 using PensaComigo.Web.Storage;
 using PensaComigo.Web.Swagger;
 using PensaComigo.Web.Visitantes;
@@ -64,6 +66,15 @@ builder.Services.AddPersistence(builder.Configuration);
 builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
 // Troca do code pelo id_token no fluxo conduzido pelo backend (issue #17).
 builder.Services.AddHttpClient<IGoogleCodeExchanger, GoogleCodeExchanger>();
+
+// Preview de link (issue #21): redirects manuais (guarda de SSRF por salto), timeout curto.
+builder.Services.AddScoped<IBuscadorPaginaExterna, BuscadorPaginaExterna>();
+builder.Services.AddHttpClient(BuscadorPaginaExterna.ClienteHttp, c =>
+    {
+        c.Timeout = TimeSpan.FromSeconds(5);
+        c.DefaultRequestHeaders.UserAgent.ParseAdd("PensaComigo-LinkPreview/1.0");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
 // Storage (Fatia 14). Options pattern: seção tipada + validada NA SUBIDA — sem ServiceRoleKey
