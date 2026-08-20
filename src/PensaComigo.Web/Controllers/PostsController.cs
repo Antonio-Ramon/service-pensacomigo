@@ -9,6 +9,7 @@ using PensaComigo.Application.Posts.Criar;
 using PensaComigo.Application.Posts.Deletar;
 using PensaComigo.Application.Posts.Editar;
 using PensaComigo.Application.Posts.Listar;
+using PensaComigo.Application.Posts.Obter;
 using PensaComigo.Domain.Common;
 
 namespace PensaComigo.Web.Controllers;
@@ -40,10 +41,17 @@ public class PostsController(ISender mediator) : ControllerBase
     public async Task<ActionResult<PostDetalheResponse>> Abrir(string slug, CancellationToken ct) =>
         Ok(await mediator.Send(new AbrirPostCommand(slug), ct));
 
+    /// <summary>Detalhe por id para o EDITOR (issue #29): só o dono, sem contar visualização.
+    /// Prefixo `id/` para não colidir com a rota pública `{slug}`.</summary>
+    [HttpGet("id/{id:guid}")]
+    public async Task<ActionResult<PostDetalheResponse>> Obter(Guid id, CancellationToken ct) =>
+        Ok(await mediator.Send(new ObterPostQuery(id, AutorId), ct));
+
     [HttpPost]
     public async Task<ActionResult<PostResponse>> Criar(CriarPostRequest req, CancellationToken ct)
     {
-        var command = new CriarPostCommand(AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo, req.Status);
+        var command = new CriarPostCommand(AutorId, req.Titulo, req.Dek, req.ImagemCapa, req.TagIds,
+            req.Conteudo, req.Status, req.Moods ?? [], req.EtapaId, req.DataPublicacao);
 
         return Ok(await mediator.Send(command, ct));
     }
@@ -51,7 +59,8 @@ public class PostsController(ISender mediator) : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<PostResponse>> Editar(Guid id, EditarPostRequest req, CancellationToken ct)
     {
-        var command = new EditarPostCommand(id, AutorId, req.Titulo, req.ImagemCapa, req.TagIds, req.Conteudo, req.Status);
+        var command = new EditarPostCommand(id, AutorId, req.Titulo, req.Dek, req.ImagemCapa, req.TagIds,
+            req.Conteudo, req.Status, req.Moods ?? [], req.EtapaId, req.DataPublicacao);
 
         return Ok(await mediator.Send(command, ct));
     }
