@@ -36,13 +36,30 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
             ? db.Posts
             : db.Posts.Where(p => p.Status == Domain.Enums.StatusPost.Publicado);
 
-        // Autor e Tags entram no card do feed. ponytail: o Include traz o Conteudo (jsonb) junto
-        // porque a entidade vem inteira — projetar colunas se o payload do feed pesar.
-        var (total, query) = await fonte.AsNoTracking()
-            .Include(p => p.Autor)
-            .Include(p => p.Tags)
-            .GridifyQueryableAsync(consulta, Mapper, ct);
-        return new Pagina<Post>(await query.ToListAsync(ct), total);
+        var (total, query) = await fonte.AsNoTracking().GridifyQueryableAsync(consulta, Mapper, ct);
+
+        // Projeção explícita (sem o Conteudo jsonb — issue #19): 20 posts por página com o corpo
+        // junto seria payload absurdo. EF não projeta direto em entidade, daí o shape anônimo
+        // no SQL e a remontagem do Post em memória.
+        var linhas = await query.Select(p => new
+        {
+            p.Id, p.Titulo, p.Slug, p.ImagemCapa, p.TempoLeitura,
+            p.QtdCurtidas, p.QtdVisualizacoes, p.DataCriacao, p.Status, p.DataPublicacao,
+            Autor = new { p.Autor.Id, p.Autor.Nome, p.Autor.ImagemUrl },
+            Tags = p.Tags.Select(t => new { t.Id, t.Nome, t.Slug }).ToList(),
+        }).ToListAsync(ct);
+
+        var itens = linhas.Select(l => new Post
+        {
+            Id = l.Id, Titulo = l.Titulo, Slug = l.Slug, ImagemCapa = l.ImagemCapa,
+            TempoLeitura = l.TempoLeitura, QtdCurtidas = l.QtdCurtidas,
+            QtdVisualizacoes = l.QtdVisualizacoes, DataCriacao = l.DataCriacao,
+            Status = l.Status, DataPublicacao = l.DataPublicacao,
+            Autor = new Usuario { Id = l.Autor.Id, Nome = l.Autor.Nome, ImagemUrl = l.Autor.ImagemUrl },
+            Tags = l.Tags.Select(t => new Tag { Id = t.Id, Nome = t.Nome, Slug = t.Slug }).ToList(),
+        }).ToList();
+
+        return new Pagina<Post>(itens, total);
     }
 
     public Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default) =>
