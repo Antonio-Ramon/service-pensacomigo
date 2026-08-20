@@ -26,7 +26,7 @@ public class AbrirPostCommandHandler(IPostRepository posts)
             post.Conteudo.OrderBy(b => b.Ordem).ToList(),
             post.TempoLeitura, post.QtdCurtidas, post.QtdVisualizacoes + 1,
             post.DataCriacao, post.DataAtualizacao,
-            new AutorResponse(post.Autor.Id, post.Autor.Nome, post.Autor.ImagemUrl),
+            new AutorResponse(post.Autor.Id, post.Autor.Nome, post.Autor.ImagemUrl, post.Autor.Bio),
             post.Tags.Select(t => new TagResponse(t.Id, t.Nome, t.Slug)).ToList(),
             post.DataPublicacao);
     }

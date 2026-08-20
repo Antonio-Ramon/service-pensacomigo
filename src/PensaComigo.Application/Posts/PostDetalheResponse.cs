@@ -19,4 +19,4 @@ public record PostDetalheResponse(
     IReadOnlyList<TagResponse> Tags,
     DateTime? DataPublicacao);
 
-public record AutorResponse(Guid Id, string Nome, string ImagemUrl);
+public record AutorResponse(Guid Id, string Nome, string ImagemUrl, string? Bio = null);
