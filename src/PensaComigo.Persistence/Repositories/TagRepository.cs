@@ -14,7 +14,8 @@ public class TagRepository(PensaComigoDbContext db) : ITagRepository
 
     /// <summary>Whitelist do que o cliente pode filtrar/ordenar via querystring. Nada fora daqui.</summary>
     private static readonly IGridifyMapper<Tag> Mapper = new GridifyMapper<Tag>()
-        .AddMap("nome", t => t.Nome)
+        // unaccent nos dois lados: coluna no SQL, termo no C# (issue #30).
+        .AddMap("nome", t => EF.Functions.Unaccent(t.Nome), v => Textos.RemoverAcentos(v))
         .AddMap("slug", t => t.Slug);
 
     public async Task<Pagina<Tag>> ListarAsync(IGridifyQuery consulta, CancellationToken ct = default)
@@ -36,4 +37,11 @@ public class TagRepository(PensaComigoDbContext db) : ITagRepository
 
     public async Task AdicionarAsync(Tag tag, CancellationToken ct = default) =>
         await db.Tags.AddAsync(tag, ct);
+
+    // COUNT direto na junção: não carrega post nenhum pra memória.
+    public Task<int> ContarPostsAsync(Guid id, CancellationToken ct = default) =>
+        db.Posts.CountAsync(p => p.Tags.Any(t => t.Id == id), ct);
+
+    // Só rastreia a remoção. O SaveChanges fica pro UnitOfWorkBehavior.
+    public void Remover(Tag tag) => db.Tags.Remove(tag);
 }

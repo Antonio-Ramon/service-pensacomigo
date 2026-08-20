@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PensaComigo.Application.Tags;
 using PensaComigo.Application.Tags.Criar;
+using PensaComigo.Application.Tags.Deletar;
 using PensaComigo.Application.Tags.Listar;
 using PensaComigo.Domain.Common;
 
@@ -24,4 +25,14 @@ public class TagsController(ISender mediator) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<TagResponse>> Criar(CriarTagCommand command, CancellationToken ct) =>
         Ok(await mediator.Send(command, ct));
+
+    /// <summary>Excluir tag (issue #32). Vinculada a post → 422 com a contagem.</summary>
+    [Authorize]
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Deletar(Guid id, CancellationToken ct)
+    {
+        await mediator.Send(new DeletarTagCommand(id), ct);
+
+        return NoContent();
+    }
 }
