@@ -41,7 +41,7 @@ public abstract class PostEscritaValidator<T> : AbstractValidator<T> where T : I
             .IsInEnum().WithMessage("Mood inválido.");
 
         RuleFor(c => c.Status)
-            .IsInEnum().WithMessage("Status inválido: 0 (Rascunho), 1 (Publicado) ou 2 (Agendado).");
+            .IsInEnum().WithMessage("Status inválido: Rascunho, Publicado ou Agendado.");
 
         // Agendar sem data (ou com data passada) é um post que nunca entra no ar.
         RuleFor(c => c.DataPublicacao)
