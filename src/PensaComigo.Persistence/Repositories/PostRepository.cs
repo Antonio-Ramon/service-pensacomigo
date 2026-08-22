@@ -27,7 +27,7 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
         .AddMap("etapa", p => (int?)p.Etapa!.Numero)
         .AddMap("dataCriacao", p => p.DataCriacao)
         .AddMap("dataPublicacao", p => p.DataPublicacao)
-        .AddMap("status", p => p.Status);
+        .AddMap("status", p => p.Status, v => Enum.Parse<Domain.Enums.StatusPost>(v, true));
 
     public async Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, bool incluirRascunhos = false, CancellationToken ct = default)
     {
