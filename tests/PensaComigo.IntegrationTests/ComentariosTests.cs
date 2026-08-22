@@ -183,6 +183,34 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
     }
 
     [Fact]
+    public async Task Admin_ve_o_oculto_na_listagem_e_consegue_reexibir()
+    {
+        var post = await CriarPostAsync();
+        var raiz = await ComentarAsync(ClienteVisitante(), post.Id, "Some e volta");
+        var admin = await ClienteAdminAsync();
+
+        await admin.PatchAsync(
+            $"/api/v1/posts/{post.Id}/comentarios/{raiz.Id}/ocultar", new StringContent(string.Empty));
+
+        // Anônimo não vê; admin vê, marcado como oculto — é o que a tela de moderação usa.
+        var paraAnonimo = await factory.CreateClient()
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+        Assert.DoesNotContain(paraAnonimo!.Items, c => c.Id == raiz.Id);
+
+        var paraAdmin = await admin
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+        Assert.False(Assert.Single(paraAdmin!.Items, c => c.Id == raiz.Id).Aprovado);
+
+        var reexibiu = await admin.PatchAsync(
+            $"/api/v1/posts/{post.Id}/comentarios/{raiz.Id}/reexibir", new StringContent(string.Empty));
+        Assert.Equal(HttpStatusCode.NoContent, reexibiu.StatusCode);
+
+        var voltou = await factory.CreateClient()
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+        Assert.True(Assert.Single(voltou!.Items, c => c.Id == raiz.Id).Aprovado);
+    }
+
+    [Fact]
     public async Task Admin_deleta_comentario_e_a_resposta_cai_junto()
     {
         var post = await CriarPostAsync();

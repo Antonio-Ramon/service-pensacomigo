@@ -21,4 +21,7 @@ public class ListarComentariosQuery(Guid postId, IGridifyQuery consulta)
     public Guid PostId { get; } = postId;
 
     public IGridifyQuery Consulta { get; } = consulta;
+
+    /// <summary>Ocultos só para admin. Quem decide é o controller, pela claim — nunca o cliente.</summary>
+    public bool IncluirOcultos { get; init; }
 }

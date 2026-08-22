@@ -19,8 +19,8 @@ public class ComentarioRepository(PensaComigoDbContext db) : IComentarioReposito
         .AddMap("autor", c => c.Autor)
         .AddMap("dataCriacao", c => c.DataCriacao);
 
-    public async Task<Pagina<Comentario>> ListarAprovadosAsync(
-        Guid postId, IGridifyQuery consulta, CancellationToken ct = default)
+    public async Task<Pagina<Comentario>> ListarAsync(
+        Guid postId, IGridifyQuery consulta, bool incluirOcultos = false, CancellationToken ct = default)
     {
         // Conversa se lê do começo pro fim (ao contrário do feed, que é do mais novo).
         if (string.IsNullOrWhiteSpace(consulta.OrderBy)) consulta.OrderBy = "dataCriacao";
@@ -29,8 +29,8 @@ public class ComentarioRepository(PensaComigoDbContext db) : IComentarioReposito
         // no meio. As respostas vêm por filtered include (`Where` dentro do Include) —
         // vira LEFT JOIN com a condição, não N+1 nem filtro em memória.
         var raizes = db.Comentarios.AsNoTracking()
-            .Where(c => c.PostId == postId && c.Aprovado && c.ParentId == null)
-            .Include(c => c.Respostas.Where(r => r.Aprovado).OrderBy(r => r.DataCriacao));
+            .Where(c => c.PostId == postId && (incluirOcultos || c.Aprovado) && c.ParentId == null)
+            .Include(c => c.Respostas.Where(r => incluirOcultos || r.Aprovado).OrderBy(r => r.DataCriacao));
 
         var (total, query) = await raizes.GridifyQueryableAsync(consulta, Mapper, ct);
 
