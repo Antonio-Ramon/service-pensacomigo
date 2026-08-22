@@ -35,14 +35,29 @@ public class ComentariosController(ISender mediator, HashVisitante hash) : Contr
         Guid postId, [FromQuery] GridifyQuery consulta, CancellationToken ct) =>
         // Página/ordem/filtro vêm da querystring; o post sai da ROTA — o cliente não
         // escolhe de qual post lê, e por isso `postId` não é campo da consulta.
-        Ok(await mediator.Send(new ListarComentariosQuery(postId, consulta), ct));
+        // Ocultos entram só para admin, e o flag vem da CLAIM, nunca da querystring:
+        // é o que faz a tela de moderação enxergar o que escondeu (e poder reexibir).
+        Ok(await mediator.Send(
+            new ListarComentariosQuery(postId, consulta) { IncluirOcultos = EhAdmin }, ct));
+
+    private bool EhAdmin => User.HasClaim("is_admin", "true");
 
     /// <summary>Esconde o comentário (aprovado = false). Só admin — ver policy no Program.cs.</summary>
     [Authorize(Policy = "Admin")]
     [HttpPatch("{id:guid}/ocultar")]
     public async Task<IActionResult> Ocultar(Guid id, CancellationToken ct)
     {
-        await mediator.Send(new OcultarComentarioCommand(id), ct);
+        await mediator.Send(new ModerarComentarioCommand(id, Aprovado: false), ct);
+
+        return NoContent();
+    }
+
+    /// <summary>Desfaz o ocultar. Só admin — que é quem enxerga o comentário oculto na listagem.</summary>
+    [Authorize(Policy = "Admin")]
+    [HttpPatch("{id:guid}/reexibir")]
+    public async Task<IActionResult> Reexibir(Guid id, CancellationToken ct)
+    {
+        await mediator.Send(new ModerarComentarioCommand(id, Aprovado: true), ct);
 
         return NoContent();
     }
