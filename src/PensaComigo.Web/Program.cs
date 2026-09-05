@@ -224,12 +224,10 @@ app.UseForwardedHeaders();
 
 app.UseExceptionHandler();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    // Já abre em modo editável: sem precisar clicar em "Try it out" a cada endpoint.
-    app.UseSwaggerUI(ui => ui.EnableTryItOutByDefault());
-}
+// Publicado também em produção: a API é aberta e o Swagger é a documentação dela.
+app.UseSwagger();
+// Já abre em modo editável: sem precisar clicar em "Try it out" a cada endpoint.
+app.UseSwaggerUI(ui => ui.EnableTryItOutByDefault());
 
 // Em dev o front (Node) rejeita o dev-cert self-signed: sem redirect, http://localhost:5001 serve direto.
 if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
