@@ -1,9 +1,9 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using PensaComigo.Application.Auth;
 using PensaComigo.Application.Auth.Login;
-using PensaComigo.Domain.Exceptions;
 
 namespace PensaComigo.Web.Controllers;
 
@@ -14,7 +14,8 @@ namespace PensaComigo.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
-public class AuthController(ISender mediator, IConfiguration config, IWebHostEnvironment env) : ControllerBase
+public class AuthController(
+    ISender mediator, IConfiguration config, IWebHostEnvironment env, ILogger<AuthController> logger) : ControllerBase
 {
     public const string CookieSessao = "pc_sessao";
     private const string CookieOAuth = "pc_oauth";
@@ -54,30 +55,52 @@ public class AuthController(ISender mediator, IConfiguration config, IWebHostEnv
     }
 
     /// <summary>Volta do Google: confere o state, troca o code pelo id_token, valida e
-    /// resolve o usuário (mesmo pipeline do login antigo) e emite a sessão como cookie.</summary>
+    /// resolve o usuário (mesmo pipeline do login antigo) e emite a sessão como cookie.
+    /// É navegação top-level do browser: TODA falha vira redirect pro front com ?erro=,
+    /// nunca JSON de erro na cara do leitor.</summary>
     [HttpGet("google/callback")]
     [AllowAnonymous]
     public async Task<IActionResult> CallbackGoogle(
-        [FromQuery] string code, [FromQuery] string state,
+        [FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error,
         [FromServices] IGoogleCodeExchanger exchanger, CancellationToken ct)
     {
         var cookie = Request.Cookies[CookieOAuth];
         Response.Cookies.Delete(CookieOAuth, new CookieOptions { Path = "/api/v1/auth" });
 
-        if (string.IsNullOrEmpty(state) || cookie is null || !cookie.StartsWith(state + "|"))
-            throw new NaoAutorizadoException("Fluxo de login inválido ou expirado. Comece de novo.");
+        var destino = ResolverDestino(null);   // fallback até o cookie dizer o destino real
 
-        var destino = cookie[(state.Length + 1)..];
+        try
+        {
+            // O Google devolve ?error=access_denied quando o usuário cancela no consent.
+            if (!string.IsNullOrEmpty(error))
+                return RedirectComErro(destino, "cancelado");
 
-        var idToken = await exchanger.TrocarCodePorIdTokenAsync(code, UrlCallback(), ct);
-        var login = await mediator.Send(new LoginGoogleCommand(idToken), ct);
+            if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(code) ||
+                cookie is null || !cookie.StartsWith(state + "|"))
+                return RedirectComErro(destino, "expirado");
 
-        Response.Cookies.Append(CookieSessao, login.Token, OpcoesCookieSessao(
-            // MaxAge acompanha a validade do JWT dentro do cookie (8h, sem refresh — como antes).
-            maxAge: TimeSpan.FromHours(8)));
+            destino = cookie[(state.Length + 1)..];
 
-        return Redirect(destino);
+            var idToken = await exchanger.TrocarCodePorIdTokenAsync(code, UrlCallback(), ct);
+            var login = await mediator.Send(new LoginGoogleCommand(idToken), ct);
+
+            Response.Cookies.Append(CookieSessao, login.Token, OpcoesCookieSessao(
+                // MaxAge acompanha a validade do JWT dentro do cookie (8h, sem refresh — como antes).
+                maxAge: TimeSpan.FromHours(8)));
+
+            return Redirect(destino);
+        }
+        catch (Exception ex)
+        {
+            // Banco fora, Google fora, token inválido: o leitor só precisa voltar pro front
+            // sabendo que falhou. O diagnóstico fica no log.
+            logger.LogError(ex, "Falha no callback do Google");
+            return RedirectComErro(destino, "falhou");
+        }
     }
+
+    private IActionResult RedirectComErro(string destino, string motivo) =>
+        Redirect(QueryHelpers.AddQueryString(destino, "erro", motivo));
 
     /// <summary>Logout: expira o cookie de sessão. O JWT em si só morre no vencimento (8h).</summary>
     [HttpPost("logout")]
