@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using PensaComigo.Domain.Entities;
 
@@ -14,6 +14,7 @@ public class ComentarioConfiguration : IEntityTypeConfiguration<Comentario>
         builder.Property(c => c.Id).HasColumnName("id");
         builder.Property(c => c.PostId).HasColumnName("post_id");
         builder.Property(c => c.ParentId).HasColumnName("parent_id");
+        builder.Property(c => c.UsuarioId).HasColumnName("usuario_id");
         builder.Property(c => c.Autor).HasColumnName("autor").IsRequired();
         builder.Property(c => c.Conteudo).HasColumnName("conteudo").IsRequired();
         builder.Property(c => c.Aprovado).HasColumnName("aprovado").HasDefaultValue(false);
@@ -27,6 +28,13 @@ public class ComentarioConfiguration : IEntityTypeConfiguration<Comentario>
                .WithMany(p => p.Comentarios)
                .HasForeignKey(c => c.PostId)
                .OnDelete(DeleteBehavior.Cascade);
+
+        // Comentário do autor logado. SetNull: apagar o usuário não apaga a conversa —
+        // o comentário fica, só perde a foto e a marca de "autor".
+        builder.HasOne(c => c.Usuario)
+               .WithMany()
+               .HasForeignKey(c => c.UsuarioId)
+               .OnDelete(DeleteBehavior.SetNull);
 
         // Auto-referência — resposta aponta para o comentário pai
         builder.HasOne(c => c.Parent)

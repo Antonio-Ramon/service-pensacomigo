@@ -1,4 +1,4 @@
-using MediatR;
+﻿using MediatR;
 using PensaComigo.Domain.Entities;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
@@ -12,13 +12,17 @@ namespace PensaComigo.Application.Comentarios.Criar;
 public class CriarComentarioCommandHandler(
     IPostRepository posts,
     IComentarioRepository comentarios,
+    IUsuarioRepository usuarios,
     LimitadorDeComentarios limitador)
     : IRequestHandler<CriarComentarioCommand, ComentarioResponse>
 {
     public async Task<ComentarioResponse> Handle(CriarComentarioCommand cmd, CancellationToken ct)
     {
-        // Primeiro de tudo: quem está inundando não merece nem um SELECT.
-        limitador.Registrar(cmd.Visitante);
+        // Autor logado não passa pelo balde do anônimo: responder dez leitores seguidos é
+        // trabalho, não inundação — e ele já é identificado pela sessão, não pelo IP.
+        if (cmd.UsuarioId is null)
+            // Primeiro de tudo: quem está inundando não merece nem um SELECT.
+            limitador.Registrar(cmd.Visitante);
 
         if (!await posts.ExistePorIdAsync(cmd.PostId, ct))
             throw new NaoEncontradoException("Post", cmd.PostId);
@@ -39,12 +43,20 @@ public class CriarComentarioCommandHandler(
                 throw new RegraDeNegocioException("O comentário respondido não é deste post.");
         }
 
+        // Quem está logado assina com o nome da CONTA, não com o que veio no corpo:
+        // a assinatura do autor do blog não pode depender do que o cliente digitou.
+        // Token válido apontando pra conta apagada: é 404, não um comentário sem assinatura.
+        var usuario = cmd.UsuarioId is Guid id
+            ? await usuarios.ObterPorIdAsync(id, ct) ?? throw new NaoEncontradoException("Usuário", id)
+            : null;
+
         var comentario = new Comentario
         {
             Id = Guid.NewGuid(),
             PostId = cmd.PostId,
             ParentId = cmd.ParentId,
-            Autor = cmd.Autor.Trim(),
+            UsuarioId = usuario?.Id,
+            Autor = usuario?.Nome ?? cmd.Autor.Trim(),
             Conteudo = cmd.Conteudo.Trim(),
             Aprovado = true,
         };

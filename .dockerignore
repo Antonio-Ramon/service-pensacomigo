@@ -1,0 +1,9 @@
+# bin/obj do host carregam caminhos absolutos que quebram o restore dentro da imagem.
+**/bin/
+**/obj/
+.git/
+.claude/
+.agents/
+.teach/
+.scratch/
+docs/

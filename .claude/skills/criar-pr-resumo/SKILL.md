@@ -12,7 +12,7 @@ description: 'Gera a descrição de um Pull Request de forma simples, direta e d
 
 Gerar uma descrição de Pull Request clara, simples e objetiva, agrupando as alterações por módulo ou funcionalidade, no padrão adotado pelo projeto.
 
-O resultado **deve sempre** ser salvo como arquivo `.md` no diretório `_bmad-output/` do workspace com o nome `pr-description-[data-hoje].md`, e exibido como artifact ao usuário — pronto para copiar e colar no GitHub, Azure DevOps ou qualquer outra plataforma.
+O resultado é exibido direto na resposta, em Markdown puro — pronto para copiar e colar no GitHub, Azure DevOps ou qualquer outra plataforma. **Não** salve arquivo algum.
 
 ## Regras Gerais
 
@@ -131,6 +131,4 @@ O output deve seguir **exatamente** este padrão, com o título obrigatório no 
 
 Após montar a descrição:
 
-1. **Salve** o conteúdo como `_bmad-output/pr-description-[YYYY-MM-DD].md` (use a data atual no nome).
-2. **Exiba como artifact** para o usuário — o conteúdo deve ser Markdown puro, sem envolver em bloco de código, para que seja renderizado e copiável diretamente.
-3. Informe ao usuário que o arquivo foi salvo e onde está, em uma linha curta após o artifact.
+**Exiba a descrição na resposta** — Markdown puro, sem envolver em bloco de código, para que seja renderizado e copiável diretamente. Não crie arquivo.

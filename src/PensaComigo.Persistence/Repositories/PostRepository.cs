@@ -1,4 +1,4 @@
-using Gridify;
+﻿using Gridify;
 using Gridify.EntityFramework;
 using Microsoft.EntityFrameworkCore;
 using PensaComigo.Domain.Common;
@@ -11,6 +11,10 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
 {
     public Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default) =>
         db.Posts.FirstOrDefaultAsync(p => p.Id == id, ct);
+
+    public async Task<Guid?> ObterAutorIdAsync(Guid id, CancellationToken ct = default) =>
+        await db.Posts.AsNoTracking().Where(p => p.Id == id)
+            .Select(p => (Guid?)p.AutorId).FirstOrDefaultAsync(ct);
 
     public Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default) =>
         db.Posts.AnyAsync(p => p.Id == id, ct);

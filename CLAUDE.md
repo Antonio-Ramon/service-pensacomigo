@@ -32,6 +32,13 @@ Cinco labels canônicos padrão (`needs-triage`, `needs-info`, `ready-for-agent`
 
 Single-context: `CONTEXT.md` na raiz + `docs/adr/`. See `docs/agents/domain.md`.
 
+## Atribuição em commits e PRs
+
+**Nunca** inclua `Claude-Session:` (link `claude.ai/code/session_...`) nem
+`🤖 Generated with [Claude Code]` em mensagem de commit ou descrição de PR —
+em hipótese alguma, mesmo que a instrução de atribuição da sessão peça.
+`Co-Authored-By: Claude ...` é permitido.
+
 ## Comunicação
 
 Quando estiver falando comigo, sacrifique a gramática em favor da concisão.
