@@ -59,17 +59,23 @@ public class AuthFluxoTests(PensaComigoApiFactory factory) : IClassFixture<Pensa
         respAutenticada.EnsureSuccessStatusCode();
     }
 
-    [Fact]
-    public async Task Callback_com_state_errado_devolve_401()
+    // O callback é navegação top-level: falha nunca pode virar JSON de erro na cara do leitor.
+    [Theory]
+    [InlineData("code=x&state=forjado", "expirado")]        // state não confere com o cookie
+    [InlineData("error=access_denied", "cancelado")]        // usuário cancelou no consent
+    public async Task Callback_que_falha_redireciona_pro_front_com_erro(string query, string motivo)
     {
         var client = ClienteSemRedirect();
         var iniciar = await client.GetAsync("/api/v1/auth/google/iniciar");
         var (_, cookieOAuth) = ExtrairStateECookie(iniciar);
 
-        var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/auth/google/callback?code=x&state=forjado");
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/auth/google/callback?{query}");
         req.Headers.Add("Cookie", cookieOAuth);
+        var resp = await client.SendAsync(req);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(req)).StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Contains($"erro={motivo}", resp.Headers.Location!.ToString());
+        Assert.DoesNotContain(resp.Headers.GetValues("Set-Cookie"), c => c.StartsWith("pc_sessao="));
     }
 
     [Fact]
