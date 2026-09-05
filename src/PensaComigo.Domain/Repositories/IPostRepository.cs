@@ -1,4 +1,4 @@
-using Gridify;
+﻿using Gridify;
 using PensaComigo.Domain.Common;
 using PensaComigo.Domain.Entities;
 
@@ -7,6 +7,10 @@ namespace PensaComigo.Domain.Repositories;
 public interface IPostRepository
 {
     Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default);
+
+    /// <summary>Id do dono do post, sem trazer a entidade (e o `conteudo` jsonb) junto.
+    /// null quando o post não existe.</summary>
+    Task<Guid?> ObterAutorIdAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>Só a existência (vira `EXISTS` no SQL) — para quem não vai usar a entidade.</summary>
     Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default);

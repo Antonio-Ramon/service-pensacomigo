@@ -1,3 +1,5 @@
+﻿using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Gridify;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
@@ -23,8 +25,10 @@ public class ComentariosController(ISender mediator, HashVisitante hash) : Contr
     public async Task<ActionResult<ComentarioResponse>> Criar(
         Guid postId, CriarComentarioRequest req, CancellationToken ct)
     {
+        // Logado comenta como ELE MESMO: o id sai da claim e o nome é resolvido no handler.
+        // Anônimo segue mandando o nome no corpo, que é o caso normal da conversa.
         var command = new CriarComentarioCommand(
-            postId, req.ParentId, req.Autor, req.Conteudo, hash.De(HttpContext));
+            postId, req.ParentId, req.Autor ?? string.Empty, req.Conteudo, hash.De(HttpContext), UsuarioLogado);
 
         return Ok(await mediator.Send(command, ct));
     }
@@ -41,6 +45,9 @@ public class ComentariosController(ISender mediator, HashVisitante hash) : Contr
             new ListarComentariosQuery(postId, consulta) { IncluirOcultos = EhAdmin }, ct));
 
     private bool EhAdmin => User.HasClaim("is_admin", "true");
+
+    private Guid? UsuarioLogado =>
+        Guid.TryParse(User.FindFirstValue(JwtRegisteredClaimNames.Sub), out var id) ? id : null;
 
     /// <summary>Esconde o comentário (aprovado = false). Só admin — ver policy no Program.cs.</summary>
     [Authorize(Policy = "Admin")]

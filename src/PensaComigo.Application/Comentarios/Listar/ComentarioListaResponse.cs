@@ -9,6 +9,11 @@ namespace PensaComigo.Application.Comentarios.Listar;
 /// e acabou — não existe <c>Respostas</c> dentro de <see cref="RespostaResponse"/>.
 /// O tipo espelha a regra de negócio; um shape recursivo prometeria o que a API não faz.
 /// </para>
+/// <para>
+/// <c>AutorImagemUrl</c> e <c>EhAutorDoPost</c> só têm valor em comentário de usuário
+/// logado; para o visitante anônimo são <c>null</c>/<c>false</c>. A comparação com o
+/// dono do post é feita AQUI e não no cliente: o front não recebe o id de quem comentou.
+/// </para>
 /// </summary>
 public record ComentarioListaResponse(
     Guid Id,
@@ -16,6 +21,15 @@ public record ComentarioListaResponse(
     string Conteudo,
     DateTime DataCriacao,
     bool Aprovado,
+    string? AutorImagemUrl,
+    bool EhAutorDoPost,
     IReadOnlyList<RespostaResponse> Respostas);
 
-public record RespostaResponse(Guid Id, string Autor, string Conteudo, DateTime DataCriacao, bool Aprovado);
+public record RespostaResponse(
+    Guid Id,
+    string Autor,
+    string Conteudo,
+    DateTime DataCriacao,
+    bool Aprovado,
+    string? AutorImagemUrl,
+    bool EhAutorDoPost);

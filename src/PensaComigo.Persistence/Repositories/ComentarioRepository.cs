@@ -1,4 +1,4 @@
-using Gridify;
+﻿using Gridify;
 using Gridify.EntityFramework;
 using Microsoft.EntityFrameworkCore;
 using PensaComigo.Domain.Common;
@@ -28,9 +28,13 @@ public class ComentarioRepository(PensaComigoDbContext db) : IComentarioReposito
         // Pagina só as RAÍZES: 20 comentários, não 20 linhas soltas com respostas cortadas
         // no meio. As respostas vêm por filtered include (`Where` dentro do Include) —
         // vira LEFT JOIN com a condição, não N+1 nem filtro em memória.
+        // O Include do Usuario (na raiz e na resposta) é o que dá foto e marca de "autor"
+        // na conversa; é null na esmagadora maioria das linhas, então sai LEFT JOIN barato.
         var raizes = db.Comentarios.AsNoTracking()
             .Where(c => c.PostId == postId && (incluirOcultos || c.Aprovado) && c.ParentId == null)
-            .Include(c => c.Respostas.Where(r => incluirOcultos || r.Aprovado).OrderBy(r => r.DataCriacao));
+            .Include(c => c.Usuario)
+            .Include(c => c.Respostas.Where(r => incluirOcultos || r.Aprovado).OrderBy(r => r.DataCriacao))
+                .ThenInclude(r => r.Usuario);
 
         var (total, query) = await raizes.GridifyQueryableAsync(consulta, Mapper, ct);
 

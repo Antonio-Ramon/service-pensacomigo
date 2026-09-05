@@ -37,7 +37,7 @@ Backend do blog de meditações cristãs **Pensa Comigo**: autores publicam post
 | **Auth** | Frontend faz o OAuth do Google e envia o token; a API valida a assinatura e emite **JWT próprio** (8h). Só emails do seed logam — não cria usuário. |
 | **Posts** | CRUD do autor + feed público. Conteúdo é uma lista de blocos gravada em coluna **`jsonb`**. Slug gerado na criação e **congelado** depois; `tempo_leitura` calculado no caso de uso. |
 | **Tags** | Criar (autenticado) e listar (anônimo). Relação N:N com posts. |
-| **Comentários** | Anônimos, com moderação automática: **rate limit** de 5/min por visitante e filtro de palavrão. Uma resposta de profundidade. Admin oculta ou apaga. |
+| **Comentários** | Anônimos, com moderação automática: **rate limit** de 5/min por visitante e filtro de palavrão. Uma resposta de profundidade. Admin oculta ou apaga. Com JWT, o comentário é **assinado pela conta** (nome e foto vêm dela, não do corpo) e a listagem marca quem escreveu o post. |
 | **Curtidas** | Anônimas e idempotentes, deduplicadas por visitante via índice único `(post_id, viewer_hash)`. |
 | **Imagens** | Upload multipart pelo backend para o Supabase Storage, com whitelist de extensão/content-type e limite de 5 MB. |
 | **Visualizações** | Contador incrementado na abertura do post, atômico no banco (`coluna = coluna + 1`). |
@@ -127,7 +127,7 @@ Todos sob `/api/v1`. Versionamento é convenção de rota — sem lib até exist
 | `POST` `PUT` `DELETE` | `/posts` · `/posts/{id}` | autor dono |
 | `GET` | `/tags` | anônimo |
 | `POST` | `/tags` | autenticado |
-| `GET` `POST` | `/posts/{postId}/comentarios` | anônimo |
+| `GET` `POST` | `/posts/{postId}/comentarios` | anônimo (ou autenticado, e aí assina pela conta) |
 | `PATCH` | `/posts/{postId}/comentarios/{id}/ocultar` | **admin** |
 | `DELETE` | `/posts/{postId}/comentarios/{id}` | **admin** |
 | `POST` `DELETE` | `/posts/{postId}/curtidas` | anônimo |

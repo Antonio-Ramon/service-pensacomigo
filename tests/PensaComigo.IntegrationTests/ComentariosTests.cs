@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
@@ -244,6 +244,77 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         Assert.Equal(HttpStatusCode.Forbidden, comum.StatusCode);
     }
 
+    [Fact]
+    public async Task Logado_assina_com_o_nome_da_conta_e_a_lista_marca_o_autor_do_post()
+    {
+        var (post, autor) = await CriarPostComAutorAsync();
+        var dono = ClienteDe(autor);
+
+        // Sem `autor` no corpo de propósito: quem está logado assina com a conta.
+        var resp = await dono.PostAsJsonAsync($"/api/v1/posts/{post.Id}/comentarios",
+            new { conteudo = "Obrigado por escrever, Marina." });
+
+        resp.EnsureSuccessStatusCode();
+        var criado = await resp.Content.ReadFromJsonAsync<ComentarioResponse>();
+        Assert.Equal(autor.Nome, criado!.Autor);
+
+        var pagina = await factory.CreateClient()
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+
+        var comentario = Assert.Single(pagina!.Items, c => c.Id == criado.Id);
+        Assert.True(comentario.EhAutorDoPost);
+        Assert.Equal(autor.ImagemUrl, comentario.AutorImagemUrl);
+    }
+
+    [Fact]
+    public async Task Nome_mandado_no_corpo_nao_sobrescreve_a_assinatura_de_quem_esta_logado()
+    {
+        var (post, autor) = await CriarPostComAutorAsync();
+
+        var resp = await ClienteDe(autor).PostAsJsonAsync($"/api/v1/posts/{post.Id}/comentarios",
+            new { autor = "Outra Pessoa", conteudo = "Assinatura vem da conta." });
+
+        resp.EnsureSuccessStatusCode();
+        var criado = await resp.Content.ReadFromJsonAsync<ComentarioResponse>();
+
+        Assert.Equal(autor.Nome, criado!.Autor);
+    }
+
+    [Fact]
+    public async Task Anonimo_e_logado_que_nao_escreveu_o_post_nao_ganham_marca_de_autor()
+    {
+        var (post, _) = await CriarPostComAutorAsync();
+        var anonimo = await ComentarAsync(ClienteVisitante(), post.Id, "Sou leitor de passagem");
+
+        var outro = await (await ClienteAsync(admin: false))
+            .PostAsJsonAsync($"/api/v1/posts/{post.Id}/comentarios",
+                new { conteudo = "Logado, mas não escrevi este post." });
+        outro.EnsureSuccessStatusCode();
+        var doOutro = await outro.Content.ReadFromJsonAsync<ComentarioResponse>();
+
+        var pagina = await factory.CreateClient()
+            .GetFromJsonAsync<Pagina<ComentarioListaResponse>>($"/api/v1/posts/{post.Id}/comentarios");
+
+        var doVisitante = Assert.Single(pagina!.Items, c => c.Id == anonimo.Id);
+        Assert.False(doVisitante.EhAutorDoPost);
+        Assert.Null(doVisitante.AutorImagemUrl);   // visitante não tem conta, nem foto
+
+        var logado = Assert.Single(pagina.Items, c => c.Id == doOutro!.Id);
+        Assert.False(logado.EhAutorDoPost);        // logado sim, dono do post não
+        Assert.NotNull(logado.AutorImagemUrl);
+    }
+
+    [Fact]
+    public async Task Comentario_sem_nome_e_sem_login_devolve_422()
+    {
+        var post = await CriarPostAsync();
+
+        var resp = await ClienteVisitante().PostAsJsonAsync($"/api/v1/posts/{post.Id}/comentarios",
+            new { conteudo = "Anônimo de verdade." });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, resp.StatusCode);
+    }
+
     private static Task<ComentarioResponse> ResponderAsync(
         HttpClient client, Guid postId, Guid paiId, string texto) =>
         ComentarAsync(client, postId, texto, paiId);
@@ -279,6 +350,17 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         return client;
     }
 
+    /// <summary>Cliente com o JWT de um usuário específico — para dizer "este é o dono do post".</summary>
+    private HttpClient ClienteDe(Usuario usuario)
+    {
+        using var scope = factory.Services.CreateScope();
+        var jwt = scope.ServiceProvider.GetRequiredService<IJwtTokenGenerator>();
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt.Gerar(usuario));
+        return client;
+    }
+
     /// <summary>Cliente anônimo com identidade de visitante única (isola o rate limit).</summary>
     private HttpClient ClienteVisitante()
     {
@@ -297,12 +379,15 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         return (await resp.Content.ReadFromJsonAsync<ComentarioResponse>())!;
     }
 
-    private async Task<PostResponse> CriarPostAsync()
+    private async Task<PostResponse> CriarPostAsync() => (await CriarPostComAutorAsync()).Post;
+
+    private async Task<(PostResponse Post, Usuario Autor)> CriarPostComAutorAsync()
     {
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PensaComigoDbContext>();
         var jwt = scope.ServiceProvider.GetRequiredService<IJwtTokenGenerator>();
-        var autor = await db.Usuarios.FirstAsync();
+        // Admin de propósito: o "Leitor Comum" é o contraponto nos testes de marca de autor.
+        var autor = await db.Usuarios.FirstAsync(u => u.IsAdmin);
 
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt.Gerar(autor));
@@ -319,6 +404,6 @@ public class ComentariosTests(PensaComigoApiFactory factory) : IClassFixture<Pen
         });
 
         resp.EnsureSuccessStatusCode();
-        return (await resp.Content.ReadFromJsonAsync<PostResponse>())!;
+        return ((await resp.Content.ReadFromJsonAsync<PostResponse>())!, autor);
     }
 }
