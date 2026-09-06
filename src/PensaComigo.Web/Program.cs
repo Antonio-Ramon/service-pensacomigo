@@ -100,20 +100,22 @@ builder.Services.AddHttpClient<IStorage, SupabaseStorage>((sp, http) =>
 var proxiesConfiaveis = builder.Configuration.GetSection("ProxiesConfiaveis").Get<string[]>() ?? [];
 builder.Services.Configure<ForwardedHeadersOptions>(opcoes =>
 {
-    // CUIDADO: o middleware só checa a origem se HOUVER allowlist — com as duas listas vazias
-    // ele aceita X-Forwarded-For de qualquer cliente, que aí escolhe a própria identidade
-    // (curte o mesmo post infinitas vezes, zera o rate limit dos comentários). Por isso sem
-    // config o header é simplesmente ignorado, em vez de "confiar em todo mundo".
-    if (proxiesConfiaveis.Length == 0)
-    {
-        opcoes.ForwardedHeaders = ForwardedHeaders.None;
-        return;
-    }
-
-    opcoes.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    opcoes.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
     // O default confia no loopback; quem chega em produção é o ingress, então a lista vem do config.
     opcoes.KnownProxies.Clear();
     opcoes.KnownIPNetworks.Clear();
+
+    // CUIDADO: aceitar X-Forwarded-For sem allowlist deixa o cliente escolher a própria identidade
+    // (curte o mesmo post infinitas vezes, zera o rate limit dos comentários). Sem config só o
+    // esquema é lido, que ninguém tem o que ganhar forjando.
+    if (proxiesConfiaveis.Length == 0)
+    {
+        opcoes.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("0.0.0.0/0"));
+        opcoes.KnownIPNetworks.Add(System.Net.IPNetwork.Parse("::/0"));
+        return;
+    }
+
+    opcoes.ForwardedHeaders |= ForwardedHeaders.XForwardedFor;
 
     foreach (var proxy in proxiesConfiaveis)
     {
