@@ -88,7 +88,7 @@ public class AuthController(
                 // MaxAge acompanha a validade do JWT dentro do cookie (8h, sem refresh — como antes).
                 maxAge: TimeSpan.FromHours(8)));
 
-            return Redirect(destino);
+            return Redirect(DestinoComSessao(destino, login.Token));
         }
         catch (Exception ex)
         {
@@ -123,6 +123,19 @@ public class AuthController(
             MaxAge = maxAge,
             Path = "/",
         };
+    }
+
+    // Front em outro domínio não enxerga o cookie da API (host-only): o token vai pela URL e
+    // quem grava o cookie é o servidor do front, no domínio dele.
+    private string DestinoComSessao(string destino, string token)
+    {
+        if (!config.GetValue("Auth:CookieCrossSite", false) ||
+            !Uri.TryCreate(destino, UriKind.Absolute, out var uri))
+            return destino;
+
+        return QueryHelpers.AddQueryString(
+            $"{uri.GetLeftPart(UriPartial.Authority)}/api/sessao/entrar",
+            new Dictionary<string, string?> { ["sessao"] = token, ["para"] = destino });
     }
 
     // Guarda contra open redirect: só devolve o leitor para uma origem do front conhecida.
