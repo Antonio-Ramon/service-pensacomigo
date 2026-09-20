@@ -168,6 +168,19 @@
   limit: a constraint já limita 1 por visitante. Build verde (8 proj, 0 erro), 33 unit tests
   verdes. 5 testes de integração **sem Docker aqui**. **Ticket 08 fechado.**
 
+- [x] Fatia 23 — SignalR + eventos pós-commit (aula 0023). `AddSignalR()` + `MapHub<ComentariosHub>
+  ("/hubs/comentarios")` — **nativo, zero pacote**. Hub **anônimo** (comentário é anônimo por design).
+  `FilaDeEventos` (Scoped) + `DespachoDeEventosBehavior` registrado **ANTES** do `UnitOfWorkBehavior`:
+  handler enfileira, pipeline publica pós-commit. Sem `try/catch` de propósito — commit que estoura
+  sobe e o drain nunca roda. `ComentarioCriado : INotification` (passado; `Publish` aceita 0..N
+  handlers, `Send` exige 1). Handler do Hub mora no **Web** (`IHubContext` é ASP.NET) → scan do
+  MediatR não acha → 1 `AddScoped<INotificationHandler<ComentarioCriado>, …>` no Program.
+  CORS ganhou `x-signalr-user-agent`/`x-requested-with` (o `/negotiate` morria sem citar SignalR).
+  Build verde, **64 unit tests verdes** (+3), rodam sem Docker. O teste de ordem foi **verificado
+  falhando** com o registro invertido. Curtida e visualização ficaram de fora (ver LR 0021).
+  **Verificado rodando** contra a API local: A (no grupo) recebeu, B (fora) não; `/negotiate`
+  com CORS OK e controle negativo. O e2e prova fiação, NÃO a ordem pós-commit.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

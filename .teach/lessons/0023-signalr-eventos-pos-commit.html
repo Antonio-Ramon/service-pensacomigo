@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 23 — SignalR e eventos pós-commit</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>SignalR e eventos pós-commit</h1>
+<p class="sub">Aula 23 · Fatia 23 · Realtime de comentários — implementa o <a href="../../docs/adr/0001-realtime-signalr-mediatr.md">ADR 0001</a></p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> quem está com o post aberto vê o comentário do outro
+aparecer <em>sozinho</em>, sem F5 e sem polling. E — a parte difícil — o evento só sai
+<strong>depois</strong> que o <code>INSERT</code> entrou de verdade no Postgres.
+</div>
+
+<h2>1. Por que WebSocket nosso, e não o Realtime do Supabase</h2>
+<p>
+O Supabase oferece escutar a tabela direto do browser. Duas linhas de JS e pronto. O preço:
+o front passa a conhecer o <em>schema</em> do banco, e o <code>anon key</code> exposto obriga
+a ligar <strong>RLS</strong> em todas as tabelas — que hoje não existe, porque quem criou o
+schema foi o EF (migration <code>InicialSchema</code>, zero policies). Furaria a regra que
+vale desde a Fatia 1: <em>tudo passa pela nossa API</em>.
+</p>
+<p>
+Decisão registrada no <a href="../../docs/adr/0001-realtime-signalr-mediatr.md">ADR 0001</a>.
+Vale ler o ADR inteiro — ele é um exemplo de decisão de arquitetura que já foi
+<strong>revisada</strong> uma vez (a redação original descrevia uma ordem impossível; é
+exatamente o que a seção 3 desta aula desmonta).
+</p>
+
+<h2>2. SignalR em três peças</h2>
+<p>
+<strong>SignalR</strong> é nativo do ASP.NET Core — <em>zero pacote novo</em>. Ele te dá
+WebSocket com <em>fallback</em> automático (Server-Sent Events, long polling) para redes que
+bloqueiam WS, e reconexão do lado do cliente.
+</p>
+<table>
+<tr><th>Peça</th><th>O que é</th></tr>
+<tr><td><strong>Hub</strong></td><td>Uma classe. Os métodos <code>public</code> dela são chamáveis <em>pelo browser</em> — é o "controller" do WebSocket.</td></tr>
+<tr><td><strong>Grupo</strong></td><td>Um nome (string) com uma lista de conexões. <code>post:{id}</code> → só quem abriu aquele post recebe.</td></tr>
+<tr><td><strong>IHubContext</strong></td><td>Como o <em>resto</em> do servidor empurra mensagem sem estar dentro de uma chamada do Hub.</td></tr>
+</table>
+<pre><code>public class ComentariosHub : Hub
+{
+    <span class="cmt">// chamado PELO cliente: connection.invoke("Entrar", postId)</span>
+    public Task Entrar(Guid postId) =&gt; Groups.AddToGroupAsync(Context.ConnectionId, Grupo(postId));
+    public Task Sair(Guid postId)   =&gt; Groups.RemoveFromGroupAsync(Context.ConnectionId, Grupo(postId));
+
+    public static string Grupo(Guid postId) =&gt; $"post:{postId}";
+}</code></pre>
+<div class="card tip">
+<strong>Sem <code>[Authorize]</code> no Hub</strong>, ao contrário do que a primeira versão do ADR
+imaginava. Comentário e curtida são <em>anônimos por design</em> neste projeto (Fatias 20 e 22).
+Exigir JWT no Hub deixaria o leitor sem realtime justamente no caso de uso que é dele.
+</div>
+
+<h2>3. O problema da ordem: o handler não commita</h2>
+<p>
+O reflexo é empurrar o evento no fim do handler. Olha o que isso seria:
+</p>
+<pre><code>await comentarios.AdicionarAsync(comentario, ct);
+await hub.Clients.Group(...).SendAsync("ComentarioCriado", resposta);  <span class="cmt">// ← ERRADO</span>
+return resposta;</code></pre>
+<p>
+<code>AdicionarAsync</code> só mexe no <strong>ChangeTracker</strong>. Nenhum <code>INSERT</code>
+saiu ainda — quem manda <code>SaveChanges</code> é o <code>UnitOfWorkBehavior</code>, que
+<em>envolve</em> o handler (Fatia 5):
+</p>
+<pre><code>var resposta = await next(ct);   <span class="cmt">// ← o handler inteiro roda AQUI</span>
+await uow.CommitAsync(ct);       <span class="cmt">// ← o INSERT acontece AQUI</span>
+return resposta;</code></pre>
+<p>
+Ou seja: <strong>todo o corpo do handler é, por construção, pré-commit.</strong> Empurrar dali
+tem dois defeitos, nessa ordem de gravidade:
+</p>
+<ol>
+<li>O cliente recebe "tem comentário novo", refaz o <code>GET</code> e <strong>não acha nada</strong> — chegou antes do INSERT.</li>
+<li>Se o commit falhar, o grupo inteiro foi notificado de algo que <strong>nunca existiu</strong>.</li>
+</ol>
+
+<h2>4. A solução: enfileirar no handler, publicar na pipeline</h2>
+<p>
+O handler não publica; ele <strong>enfileira</strong>. Um buffer <code>Scoped</code> (vive uma
+requisição) guarda os eventos, e um behavior novo — registrado por <em>fora</em> do
+<code>UnitOfWorkBehavior</code> — drena a fila depois que o <code>CommitAsync</code> voltou.
+</p>
+<pre><code>public class FilaDeEventos
+{
+    private readonly List&lt;INotification&gt; eventos = [];
+    public void Adicionar(INotification evento) =&gt; eventos.Add(evento);
+    public IReadOnlyList&lt;INotification&gt; Drenar() { var copia = eventos.ToArray(); eventos.Clear(); return copia; }
+}</code></pre>
+<pre><code>public class DespachoDeEventosBehavior&lt;TRequest, TResponse&gt;(FilaDeEventos fila, IPublisher publisher)
+    : IPipelineBehavior&lt;TRequest, TResponse&gt; where TRequest : notnull
+{
+    public async Task&lt;TResponse&gt; Handle(TRequest request, RequestHandlerDelegate&lt;TResponse&gt; next, CancellationToken ct)
+    {
+        var resposta = await next(ct);          <span class="cmt">// inclui o CommitAsync do behavior de dentro</span>
+
+        foreach (var evento in fila.Drenar())   <span class="cmt">// só chega aqui se o commit não estourou</span>
+            await publisher.Publish(evento, ct);
+
+        return resposta;
+    }
+}</code></pre>
+<div class="card warn">
+<strong>Repare no que NÃO tem aqui: <code>try/catch</code>.</strong> Se o commit estourar, a
+exceção sobe e as linhas do <code>foreach</code> nunca rodam. A garantia "evento só depois do
+commit" é dada pela <em>ausência</em> de tratamento, não por um <code>if</code>. Um
+<code>catch</code> bem-intencionado nesse método reintroduziria o bug.
+</div>
+
+<h3>A ordem de registro vira a regra inteira</h3>
+<p>
+<code>AddOpenBehavior</code> monta a cebola <strong>do mais externo para o mais interno</strong>,
+na ordem em que você escreve:
+</p>
+<pre><code>cfg.AddOpenBehavior(typeof(LoggingBehavior&lt;,&gt;));
+cfg.AddOpenBehavior(typeof(ValidationBehavior&lt;,&gt;));
+cfg.AddOpenBehavior(typeof(DespachoDeEventosBehavior&lt;,&gt;));   <span class="cmt">// ← ANTES</span>
+cfg.AddOpenBehavior(typeof(UnitOfWorkBehavior&lt;,&gt;));          <span class="cmt">// ← do que ele envolve</span></code></pre>
+<pre><code>Logging
+ └─ Validation
+     └─ Despacho          ← drena DEPOIS que tudo lá dentro voltou
+         └─ UnitOfWork    ← commita
+             └─ Handler   ← enfileira</code></pre>
+<p>
+<strong>Trocar essas duas linhas de lugar reintroduz o bug sem nenhum sinal</strong>: compila,
+sobe, os testes de rota passam. Por isso a fatia deixa um teste que trava a ordem — comando que
+estoura no commit não pode produzir evento.
+</p>
+
+<h2>5. <code>Send</code> vs <code>Publish</code>: a outra metade do MediatR</h2>
+<p>
+Até agora só usamos metade da biblioteca. Vale a tabela:
+</p>
+<table>
+<tr><th></th><th><code>IRequest</code> (Command/Query)</th><th><code>INotification</code> (evento)</th></tr>
+<tr><td>Como dispara</td><td><code>mediator.Send(...)</code></td><td><code>publisher.Publish(...)</code></td></tr>
+<tr><td>Quantos handlers</td><td><strong>Exatamente 1</strong> (zero ou dois = erro)</td><td><strong>0, 1 ou N</strong> — todos rodam</td></tr>
+<tr><td>Devolve</td><td>A resposta do handler</td><td>Nada (<code>Task</code>)</td></tr>
+<tr><td>Tempo verbal</td><td>Imperativo: <code>CriarComentarioCommand</code></td><td>Passado: <code>ComentarioCriado</code></td></tr>
+</table>
+<p>
+O tempo verbal não é preciosismo. Um comando <em>pode</em> ser recusado; um evento já aconteceu,
+e quem escuta não tem direito de veto. É por isso que ele só nasce pós-commit.
+<a href="https://github.com/jbogard/MediatR/wiki#notifications">Notifications na wiki do MediatR</a>.
+</p>
+<p>
+Amanhã, "mandar e-mail pro autor do post" é um segundo <code>INotificationHandler&lt;ComentarioCriado&gt;</code>
+— nenhuma linha do handler de criação muda. É o ganho concreto do <code>Publish</code> sobre chamar
+o Hub direto.
+</p>
+
+<h2>6. O handler do evento mora no Web — e o MediatR não o acha</h2>
+<p>
+<code>IHubContext</code> é ASP.NET Core; a Application não pode referenciá-lo (Clean Architecture,
+mesma razão de <code>IStorage</code> na Fatia 14 e dos seams do Google na Fatia 10). Então o
+<code>ComentarioCriadoHandler</code> fica em <code>Web/Realtime/</code>. Só que o registro do
+MediatR escaneia <strong>a assembly da Application</strong>:
+</p>
+<pre><code>cfg.RegisterServicesFromAssembly(assembly);   <span class="cmt">// assembly = PensaComigo.Application</span></code></pre>
+<p>
+O handler no Web simplesmente não é encontrado — e o sintoma é traiçoeiro: <code>Publish</code>
+com zero handlers <strong>não é erro</strong> (ao contrário do <code>Send</code>). Tudo passa,
+nada chega na tela. Conserto de uma linha no <code>Program.cs</code>:
+</p>
+<pre><code>builder.Services.AddScoped&lt;INotificationHandler&lt;ComentarioCriado&gt;, ComentarioCriadoHandler&gt;();</code></pre>
+<p>
+Escanear a assembly do Web também resolveria, mas puxaria todo controller e classe do host para
+dentro do scan por causa de um handler. Uma linha explícita é menos mágica e menos superfície.
+</p>
+
+<h2>7. Duas armadilhas de borda</h2>
+<h3>CORS: o handshake manda header que a política não permite</h3>
+<p>
+Nossa política atual é <code>.WithHeaders("Content-Type")</code> — uma allowlist. O cliente JS do
+SignalR manda <code>x-signalr-user-agent</code> no <code>POST /negotiate</code>, e o preflight
+morre com um erro de CORS que não menciona SignalR em lugar nenhum. Os headers entram na lista.
+</p>
+<h3>Reconexão não recoloca a conexão nos grupos</h3>
+<p>
+<code>withAutomaticReconnect()</code> devolve a conexão, <strong>não</strong> a participação nos
+grupos: o grupo vive por <code>ConnectionId</code>, e o reconnect gera um novo. O front tem que
+reinvocar <code>Entrar</code> no <code>onreconnected</code> — e refazer o <code>GET</code>, porque
+o que aconteceu enquanto estava offline não é reenviado.
+</p>
+<div class="card warn">
+<strong>Pós-commit in-process não é entrega garantida.</strong> Se o processo morrer entre o
+<code>CommitAsync</code> e o <code>Publish</code>, o dado está no banco e o evento sumiu. Outbox
+transacional resolveria e é overkill aqui: a mitigação é o front tratar o stream como
+<em>aceleração</em> e o <code>GET</code> como <em>verdade</em>.
+</div>
+
+<h2>Checkpoint</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> Por que empurrar o evento no fim do handler está errado?</p>
+<button>Porque o IHubContext não pode ser injetado em classes que a camada Application registra</button>
+<button>Porque o MediatR proíbe publicar uma notification de dentro do handler de um command</button>
+<button>Porque o handler é todo pré-commit: quem manda o INSERT é o behavior que o envolve</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> Em que ordem os dois behaviors precisam ser registrados?</p>
+<button>Despacho antes de UnitOfWork, porque o registro vai do mais externo para o mais interno</button>
+<button>UnitOfWork antes de Despacho, porque o commit precisa acontecer antes de qualquer outro</button>
+<button>A ordem é irrelevante: o MediatR resolve a cebola pela dependência declarada em cada um</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> O que garante que um commit falho não produza evento?</p>
+<button>Um if no behavior conferindo se o CommitAsync devolveu ao menos uma linha alterada</button>
+<button>A ausência de try/catch: a exceção sobe e o foreach que drena a fila nunca é alcançado</button>
+<button>O escopo da FilaDeEventos, que é descartado pelo container antes do drain acontecer</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Qual a diferença prática entre <code>Send</code> e <code>Publish</code>?</p>
+<button>Send roda em memória e Publish enfileira a mensagem para entrega assíncrona posterior</button>
+<button>Send aceita behaviors na pipeline enquanto Publish ignora qualquer behavior registrado</button>
+<button>Send exige exatamente um handler; Publish aceita zero, um ou vários, e todos executam</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>5.</strong> Por que o evento chegar não dispensa o front de refazer o <code>GET</code>?</p>
+<button>Porque o push é in-process: processo caído entre commit e publish grava e perde o evento</button>
+<button>Porque o SignalR entrega a mensagem sem ordem garantida entre dois grupos diferentes</button>
+<button>Porque o corpo da notification trafega sem os campos que o banco preenche por default</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction">Overview of ASP.NET Core
+SignalR (Microsoft Learn)</a>. Complementos:
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/groups">Grupos</a>,
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/hubcontext">Enviar de fora do Hub
+(IHubContext)</a> e
+<a href="https://github.com/jbogard/MediatR/wiki#notifications">Notifications (wiki do MediatR)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0022-likes-idempotencia-contador-atomico.html">Aula 22 — idempotência e contador atômico</a> ·
+<a href="0020-comentarios-rate-limit-memoria.html">Aula 20 — criar comentário</a> ·
+<a href="0005-pipeline-mediatr.html">Aula 5 — a pipeline do MediatR</a> ·
+<a href="0014-httpclient-options-signed-url.html">Aula 14 — seam no host</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
