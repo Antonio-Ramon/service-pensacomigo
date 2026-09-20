@@ -9,8 +9,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using MediatR;
 using PensaComigo.Application;
 using PensaComigo.Application.Auth;
+using PensaComigo.Application.Comentarios;
 using PensaComigo.Application.Links;
 using PensaComigo.Application.Storage;
 using PensaComigo.Persistence;
@@ -18,6 +20,7 @@ using PensaComigo.Shared.Erros;
 using PensaComigo.Web.Auth;
 using PensaComigo.Web.Exceptions;
 using PensaComigo.Web.Links;
+using PensaComigo.Web.Realtime;
 using PensaComigo.Web.Storage;
 using PensaComigo.Web.Swagger;
 using PensaComigo.Web.Visitantes;
@@ -59,6 +62,12 @@ builder.Services.AddControllers(mvc =>
     };
 });
 builder.Services.AddApplication();
+
+// SignalR é nativo do ASP.NET Core — nenhum pacote novo (ADR 0001).
+builder.Services.AddSignalR();
+// O scan do MediatR varre a assembly da Application, e este handler mora aqui no host.
+// Publish com zero handlers NÃO é erro: sem esta linha tudo passa e nada chega na tela.
+builder.Services.AddScoped<INotificationHandler<ComentarioCriado>, ComentarioCriadoHandler>();
 builder.Services.AddPersistence(builder.Configuration);
 
 // Impls dos seams de auth (Fatia 10). Ficam no host: dependem de config e de libs externas
@@ -146,7 +155,9 @@ var origensFront = builder.Configuration.GetSection("OrigensFront").Get<string[]
 builder.Services.AddCors(opcoes => opcoes.AddDefaultPolicy(p => p
     .WithOrigins(origensFront)
     .WithMethods("GET", "POST", "PUT", "DELETE")
-    .WithHeaders("Content-Type")
+    // x-signalr-user-agent / x-requested-with vêm do handshake do cliente SignalR; fora da
+    // allowlist, o preflight do /negotiate morre num erro de CORS que não cita SignalR.
+    .WithHeaders("Content-Type", "x-signalr-user-agent", "x-requested-with")
     // A sessão do admin é cookie httpOnly (issue #17): sem credenciais o browser não o envia.
     .AllowCredentials()));
 
@@ -239,6 +250,7 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
+app.MapHub<ComentariosHub>("/hubs/comentarios");
 
 app.Run();
 
