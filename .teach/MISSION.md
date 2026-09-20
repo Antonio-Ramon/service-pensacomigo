@@ -77,7 +77,11 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 ## Realtime (ADR 0001)
 23. ✅ **SignalR + eventos pós-commit**: Hub com grupos `post:{id}`, `FilaDeEventos` + 
     `DespachoDeEventosBehavior` envolvendo o `UnitOfWork`, `INotification`/`Publish` vs
-    `IRequest`/`Send`. Backend pronto; falta o consumo no front. ← *estamos aqui*
+    `IRequest`/`Send`. Backend pronto.
+24. ✅ **Cliente SignalR no front**: `@microsoft/signalr`, as três strings que o compilador não
+    vigia, push como *sinal* (refetch do `GET`), conexão como recurso do `useEffect` e
+    `Entrar` de novo no `onreconnected`. Realtime de comentários fechado ponta a ponta.
+    ← *estamos aqui*
 
 22. ✅ **Idempotência + unicidade no banco**: curtir/descurtir anônimo; `if` é conveniência e a
     constraint única é a garantia; contador desnormalizado com `ExecuteUpdateAsync` nos dois
