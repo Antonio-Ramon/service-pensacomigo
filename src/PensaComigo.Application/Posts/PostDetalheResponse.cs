@@ -20,6 +20,7 @@ public record PostDetalheResponse(
     DateTime DataAtualizacao,
     AutorResponse Autor,
     IReadOnlyList<TagResponse> Tags,
+    StatusPost Status,
     DateTime? DataPublicacao,
     IReadOnlyList<Mood> Moods,
     EtapaResponse? Etapa);

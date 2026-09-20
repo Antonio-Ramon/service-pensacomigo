@@ -57,6 +57,37 @@ public class EditorTests(PensaComigoApiFactory factory) : IClassFixture<PensaCom
     }
 
     [Fact]
+    public async Task Despublicar_devolve_status_rascunho_no_detalhe_mesmo_com_data_congelada()
+    {
+        var client = await ClienteAutenticadoAsync();
+        var criado = await CriarPostAsync(client, $"Publicado e despublicado {Guid.NewGuid():N}");
+
+        var publicado = await client.GetFromJsonAsync<PostDetalheResponse>($"/api/v1/posts/id/{criado.Id}");
+        Assert.Equal(StatusPost.Publicado, publicado!.Status);
+        Assert.NotNull(publicado.DataPublicacao);
+
+        // Volta a rascunho: a DataPublicacao continua congelada de propósito (não reposiciona
+        // o feed ao republicar), então só o Status distingue rascunho de publicado.
+        var put = await client.PutAsJsonAsync($"/api/v1/posts/{criado.Id}", new
+        {
+            titulo = publicado.Titulo,
+            imagemCapa = publicado.ImagemCapa,
+            tagIds = Array.Empty<Guid>(),
+            conteudo = publicado.Conteudo,
+            status = StatusPost.Rascunho,
+        });
+        put.EnsureSuccessStatusCode();
+
+        var rascunho = await client.GetFromJsonAsync<PostDetalheResponse>($"/api/v1/posts/id/{criado.Id}");
+        Assert.Equal(StatusPost.Rascunho, rascunho!.Status);
+        Assert.Equal(publicado.DataPublicacao, rascunho.DataPublicacao);
+
+        // E o público deixa de enxergar.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await factory.CreateClient().GetAsync($"/api/v1/posts/{criado.Slug}")).StatusCode);
+    }
+
+    [Fact]
     public async Task Filtro_por_mood_e_busca_sem_acento_no_titulo()
     {
         var client = await ClienteAutenticadoAsync();
