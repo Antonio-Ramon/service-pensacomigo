@@ -193,6 +193,20 @@
   **Nada rodou ponta a ponta** — e2e escreveria no Supabase de produção. Fatia 23+24 fecham
   o realtime de comentários.
 
+- [x] Fatia 25 — Fan-out: sinal ou valor (aula 0025). Realtime de curtida, visualização e feed.
+  **A regra "push é sinal, GET é a verdade" não é universal**: o GET do post É o
+  `AbrirPostCommand` e INCREMENTA visualização → `CurtidasAtualizadas`/`PostVisualizado` carregam
+  o **valor**; comentário e feed seguem sinal. `ExecuteUpdate` devolve linhas afetadas, não
+  valor → `AjustarCurtidasAsync` virou SQL cru com `RETURNING` (FormattableString = parâmetro) e
+  `null` = "nada mudou, não anuncia" (4 testes novos, 1 verificado falhando). `PostPublicado`/
+  `PostRemovido` em `Clients.All` — quem está no feed não está em grupo. Hub renomeado
+  `ComentariosHub` → `TempoRealHub` (`/hubs/tempo-real`): um hub só, porque cada hub é uma
+  conexão por aba. Front: conexão saiu do `useEffect` para `src/lib/tempoReal.ts` (3 ouvintes na
+  página do post = 3 WebSockets antes); feed usa `router.refresh()` e `<FeedAoVivo />` NÃO vai no
+  layout (na página do post o refresh incrementaria view). **Corrigido no ADR**: o número do WS
+  NÃO diverge do GET — os dois leem a mesma coluna. 68 unit tests verdes, front build verde.
+  **Nada rodou ponta a ponta**; o `RETURNING` nunca tocou banco real — ponto mais frágil.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

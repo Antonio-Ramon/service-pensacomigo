@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 25 — Sinal ou valor, grupo ou todos</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>Sinal ou valor, grupo ou todos</h1>
+<p class="sub">Aula 25 · Fatia 25 · Curtida, visualização e feed ao vivo — estende o <a href="../../docs/adr/0001-realtime-signalr-mediatr.md">ADR 0001</a></p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> o realtime deixa de ser "coisa de comentário". Curtida e
+visualização sobem sozinhas na tela de quem está lendo, e post publicado aparece no feed de quem
+está na home. Três casos, <strong>um</strong> conceito novo: quem decide o formato do push é a
+pergunta <em>"o cliente consegue redescobrir isso sozinho?"</em>.
+</div>
+
+<h2>1. A régua: sinal ou valor</h2>
+<p>
+A <a href="0024-cliente-signalr-no-front.html">Aula 24</a> fechou com uma regra que parecia
+universal: <em>o push é sinal, o <code>GET</code> é a verdade</em>. Ela não é universal — é uma
+<strong>consequência</strong>, e vale enquanto duas coisas forem verdade:
+</p>
+<table>
+<tr><th>Pergunta</th><th>Sim → <em>sinal</em></th><th>Não → <em>valor</em></th></tr>
+<tr><td>Refazer o <code>GET</code> é barato e sem efeito colateral?</td><td>comentário, feed</td><td>detalhe do post</td></tr>
+<tr><td>O payload mentiria se fosse aplicado direto?</td><td>comentário (falta data, foto, respostas)</td><td>um <code>int</code> não mente</td></tr>
+</table>
+<div class="card warn">
+<strong>O detalhe que quebra a regra:</strong> o <code>GET</code> do post <em>é</em> o
+<code>AbrirPostCommand</code>, e ele <strong>incrementa visualização</strong>. Um front que
+refizesse o <code>GET</code> a cada curtida inflaria o outro contador — o realtime de um número
+corrompendo o outro. Por isso <code>CurtidasAtualizadas</code> e <code>PostVisualizado</code>
+carregam o <strong>valor</strong>, e são os únicos que carregam.
+</div>
+<p>
+Repare que a régua não fala de "tempo real"; fala de <em>quem é dono da verdade</em>. É a mesma
+pergunta da Fatia 19, quando o <code>AbrirPostCommand</code> passou a devolver
+<code>QtdVisualizacoes + 1</code> em vez de reler do banco.
+</p>
+
+<h2>2. <code>ExecuteUpdate</code> não devolve valor. <code>RETURNING</code> devolve.</h2>
+<p>
+Para empurrar o número certo, alguém precisa <em>saber</em> o número. O contador é somado no
+banco, de forma atômica, justamente para o C# nunca precisar lê-lo antes:
+</p>
+<pre><code><span class="cmt">// Fatia 22 — atômico, mas devolve LINHAS AFETADAS, não o valor</span>
+db.Posts.Where(p =&gt; p.Id == id &amp;&amp; p.QtdCurtidas + delta &gt;= 0)
+        .ExecuteUpdateAsync(s =&gt; s.SetProperty(p =&gt; p.QtdCurtidas, p =&gt; p.QtdCurtidas + delta), ct);</code></pre>
+<p>
+Ler depois com um <code>SELECT</code> seria uma segunda ida ao banco <em>e</em> uma corrida: entre
+o <code>UPDATE</code> e o <code>SELECT</code> cabe outro curtidor. O Postgres resolve os dois de
+uma vez com <code>RETURNING</code>:
+</p>
+<pre><code>var atualizado = await db.Database.SqlQuery&lt;int&gt;(
+    $"""
+    UPDATE posts SET qtd_curtidas = qtd_curtidas + {delta}
+    WHERE id = {id} AND qtd_curtidas + {delta} &gt;= 0
+    RETURNING qtd_curtidas
+    """).ToListAsync(ct);
+
+return atualizado.Count &gt; 0 ? atualizado[0] : null;   <span class="cmt">// null = nenhuma linha casou</span></code></pre>
+<div class="card tip">
+<strong>Interpolação aqui não é concatenação.</strong> <code>SqlQuery</code> recebe uma
+<code>FormattableString</code>: cada <code>{delta}</code> vira <code>$1</code>, <code>$2</code>…
+no comando enviado ao Postgres. O EF não tem como transformar isso em injeção — e é por isso que
+o mesmo código escrito com <code>string</code> comum <em>nem compila</em>.
+</div>
+<p>
+E o <code>null</code> virou informação útil: nenhuma linha casou significa <em>o contador não
+mudou</em> (post inexistente, ou a guarda do não-negativo barrou o descurtir a mais). Anunciar
+mesmo assim empurraria um número velho para todo mundo no grupo — daí o <code>if</code> no
+handler, travado por
+<a href="https://github.com/Antonio-Ramon/service-pensacomigo/blob/main/tests/PensaComigo.UnitTests/Curtidas/EventoDeCurtidaTests.cs">teste
+que foi verificado falhando</a>.
+</p>
+
+<h2>3. Grupo é para quem abriu alguma coisa</h2>
+<p>
+Curtida e visualização são <em>do post</em>: vão para <code>Clients.Group(post:{id})</code>, como
+o comentário. Post publicado não — <strong>quem está no feed não abriu post nenhum</strong>, e
+portanto não está em grupo algum. Esses vão para <code>Clients.All</code>.
+</p>
+<pre><code>hub.Clients.Group(TempoRealHub.Grupo(evento.PostId)).SendAsync("CurtidasAtualizadas", evento.Qtd, ct);
+hub.Clients.All.SendAsync("PostPublicado", evento.Slug, ct);</code></pre>
+<p>
+Com cinco eventos, o hub deixou de ser "o hub dos comentários" e virou o hub da aplicação:
+<code>ComentariosHub</code> → <code>TempoRealHub</code>, rota <code>/hubs/tempo-real</code>.
+Um hub por assunto seria pior, não melhor — <strong>cada hub é uma conexão WebSocket por aba</strong>.
+</p>
+
+<h2>4. Uma conexão por aba, do lado do front</h2>
+<p>
+Aqui o mesmo argumento cobra a fatura: a página do post tem <em>três</em> componentes ouvindo
+(comentários, curtidas, visualizações). Com o desenho da Aula 24 — conexão dentro do
+<code>useEffect</code> — seriam três WebSockets para receber eventos do mesmo grupo. A conexão
+subiu para um módulo (<code>src/lib/tempoReal.ts</code>) e passou a ser uma só; o que entra e sai
+com o componente agora é <strong>ouvinte e grupo</strong>, não conexão.
+</p>
+<pre><code>useEffect(() =&gt; ouvirPost(postId, { CurtidasAtualizadas: setTotal }), [postId]);</code></pre>
+<div class="card tip">
+De brinde, sumiu o <em>“connection was stopped during negotiation”</em>: não existe mais
+<code>stop()</code> para chegar no meio do <code>negotiate</code>. A conexão vive enquanto a aba
+viver. Em compensação, o <code>onreconnected</code> agora precisa reentrar em <strong>todos</strong>
+os grupos ativos — o módulo guarda esse conjunto, porque nenhum componente sozinho sabe dele.
+</div>
+
+<h2>5. Feed: quem redesenha é o servidor</h2>
+<p>
+A home é um <em>server component</em>. Em vez de duplicar a listagem no cliente só para
+conseguir atualizá-la, o ouvinte chama <code>router.refresh()</code> e o Next refaz o render no
+servidor com dados novos — sem F5 e sem segunda fonte de verdade.
+</p>
+<pre><code>useEffect(() =&gt; ouvirGeral({
+  PostPublicado: () =&gt; router.refresh(),
+  PostRemovido: () =&gt; router.refresh(),
+}), [router]);</code></pre>
+<div class="card warn">
+<strong>E por isso o <code>&lt;FeedAoVivo /&gt;</code> NÃO entra no layout público</strong>, só nas
+três páginas de feed. Montado no layout, ele também rodaria na página do post — e lá um
+<code>router.refresh()</code> refaz o <code>abrirPost</code>, que <strong>incrementa
+visualização</strong>. A mesma armadilha da seção 1, entrando pela porta dos fundos.
+</div>
+
+<h2>6. O que ficou de fora, de propósito</h2>
+<ul>
+<li><strong>Agendado que vence não emite nada.</strong> O post entra no ar porque
+<code>DataPublicacao &lt;= UtcNow</code> passa a ser verdade — ninguém executa comando nenhum, e
+evento nasce de caso de uso. Realtime para isso exigiria um job, que o projeto não tem.</li>
+<li><strong>Quem está lendo um post deletado não é avisado.</strong> O evento chega
+(<code>Clients.All</code>), mas a página não faz nada com ele. Dá 404 no próximo clique.</li>
+<li><strong>Visualização empurra uma mensagem por leitor que abre.</strong> Para o volume deste
+blog é ruído nenhum; em post viral vira metralhadora. Teto anotado com <code>ponytail:</code>,
+upgrade é agregar num <code>PeriodicTimer</code>.</li>
+</ul>
+
+<h2>7. Checkpoint</h2>
+
+<div class="q" data-a="1">
+<p><strong>1.</strong> Por que a curtida empurra o número, e o comentário só avisa?</p>
+<button>Porque um inteiro cabe no frame do WebSocket e o comentário inteiro passaria do limite</button>
+<button>Porque refazer o GET do post custaria +1 visualização — ele é quem incrementa o contador</button>
+<button>Porque a curtida é anônima e o servidor não sabe para quem mandar a listagem atualizada</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>2.</strong> Por que trocar <code>ExecuteUpdateAsync</code> por <code>RETURNING</code>?</p>
+<button>Porque ExecuteUpdate não roda dentro da transação do UnitOfWork e RETURNING passa a rodar</button>
+<button>Porque a guarda do não-negativo não pode ser expressa no Where de um ExecuteUpdate comum</button>
+<button>Porque ExecuteUpdate devolve linhas afetadas, e o push precisa do contador já somado</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>3.</strong> Por que <code>PostPublicado</code> vai em <code>Clients.All</code>?</p>
+<button>Porque quem está no feed não abriu post nenhum e por isso não está em grupo algum</button>
+<button>Porque o post acabou de nascer e seu grupo post:{id} ainda não existe no servidor</button>
+<button>Porque publicar é ação de admin e o evento precisa alcançar as telas de moderação</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> Por que a conexão saiu do <code>useEffect</code> e virou módulo?</p>
+<button>Porque o useEffect roda no servidor durante o SSR e a conexão quebraria a hidratação</button>
+<button>Porque o SignalR exige que a conexão exista antes do primeiro render para reconectar</button>
+<button>Porque três componentes ouvindo abririam três WebSockets para os eventos do mesmo grupo</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>5.</strong> Por que o <code>&lt;FeedAoVivo /&gt;</code> não fica no layout público?</p>
+<button>Porque o layout é server component e não pode montar um componente cliente com efeito</button>
+<button>Porque na página do post o router.refresh() refaria o GET e incrementaria visualização</button>
+<button>Porque o evento global chegaria duas vezes em quem tem a home e o post abertos em abas</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://www.postgresql.org/docs/current/dml-returning.html">Returning Data from Modified
+Rows (PostgreSQL)</a>. Complementos:
+<a href="https://learn.microsoft.com/en-us/ef/core/querying/sql-queries">SQL cru no EF Core
+(<code>SqlQuery</code>)</a>,
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/groups">Grupos e
+<code>Clients.All</code></a> e
+<a href="https://nextjs.org/docs/app/api-reference/functions/use-router#routerrefresh">
+<code>router.refresh()</code> (Next.js)</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0024-cliente-signalr-no-front.html">Aula 24 — o cliente SignalR no front</a> ·
+<a href="0023-signalr-eventos-pos-commit.html">Aula 23 — eventos pós-commit</a> ·
+<a href="0022-likes-idempotencia-contador-atomico.html">Aula 22 — contador atômico</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
