@@ -97,9 +97,20 @@ public class PostRepository(PensaComigoDbContext db) : IPostRepository
 
     // Mesma ideia do contador de visualizações, agora nos dois sentidos. O `>= 0` no Where é
     // guarda no BANCO: descurtir a mais não casa nenhuma linha em vez de deixar o contador negativo.
-    public Task AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default) =>
-        db.Posts.Where(p => p.Id == id && p.QtdCurtidas + delta >= 0)
-                .ExecuteUpdateAsync(s => s.SetProperty(p => p.QtdCurtidas, p => p.QtdCurtidas + delta), ct);
+    // SQL cru por um motivo só: `ExecuteUpdateAsync` devolve LINHAS AFETADAS, não valor, e o
+    // realtime precisa do número somado. `RETURNING` traz os dois na MESMA ida ao banco (lista
+    // vazia = nenhuma linha casou). Interpolação em FormattableString vira parâmetro, não concat.
+    public async Task<int?> AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default)
+    {
+        var atualizado = await db.Database.SqlQuery<int>(
+            $"""
+            UPDATE posts SET qtd_curtidas = qtd_curtidas + {delta}
+            WHERE id = {id} AND qtd_curtidas + {delta} >= 0
+            RETURNING qtd_curtidas
+            """).ToListAsync(ct);
+
+        return atualizado.Count > 0 ? atualizado[0] : null;
+    }
 
     // StartsWith vira `LIKE 'prefixo%'` no Postgres — pega "meditar" e "meditar-2" de uma vez.
     public async Task<IReadOnlyList<string>> ListarSlugsComPrefixoAsync(string prefixo, CancellationToken ct = default) =>
