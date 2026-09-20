@@ -33,22 +33,26 @@ public class TagsTests(PensaComigoApiFactory factory) : IClassFixture<PensaComig
         autenticado.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", await TokenDoSeedAsync());
 
+        // Nome único: "Saúde Mental" sozinho já vem no seed, e slug equivalente é 422.
+        var marca = Guid.NewGuid().ToString("N")[..8];
+        var slug = $"saude-mental-{marca}";
+
         // Autor cria (acento vira slug limpo).
-        var criada = await autenticado.PostAsJsonAsync("/api/v1/tags", new { nome = "Saúde Mental" });
+        var criada = await autenticado.PostAsJsonAsync("/api/v1/tags", new { nome = $"Saúde Mental {marca}" });
         criada.EnsureSuccessStatusCode();
         var tag = await criada.Content.ReadFromJsonAsync<TagResponse>();
-        Assert.Equal("saude-mental", tag!.Slug);
+        Assert.Equal(slug, tag!.Slug);
 
         // Leitor anônimo enxerga a tag recém-criada — resposta no envelope { items, totalItems }.
         var anonimo = factory.CreateClient();
         var pagina = await anonimo.GetFromJsonAsync<Pagina<TagResponse>>("/api/v1/tags");
-        Assert.Contains(pagina!.Items, t => t.Slug == "saude-mental");
+        Assert.Contains(pagina!.Items, t => t.Slug == slug);
         Assert.True(pagina.TotalItems >= 1);
 
         // Filtro dinâmico do Gridify (DSL na querystring, traduzida pra SQL).
-        var filtrada = await anonimo.GetFromJsonAsync<Pagina<TagResponse>>("/api/v1/tags?filter=slug=saude-mental");
+        var filtrada = await anonimo.GetFromJsonAsync<Pagina<TagResponse>>($"/api/v1/tags?filter=slug={slug}");
         Assert.Equal(1, filtrada!.TotalItems);
-        Assert.Equal("saude-mental", filtrada.Items.Single().Slug);
+        Assert.Equal(slug, filtrada.Items.Single().Slug);
     }
 
     // Reusa o próprio gerador de JWT da API (via DI) e o usuário do seed pra emitir um token válido.
