@@ -181,6 +181,18 @@
   **Verificado rodando** contra a API local: A (no grupo) recebeu, B (fora) não; `/negotiate`
   com CORS OK e controle negativo. O e2e prova fiação, NÃO a ordem pós-commit.
 
+- [x] Fatia 24 — Cliente SignalR no front (aula 0024). Repo `front-pensacomigo`:
+  `@microsoft/signalr` (única dep nova — o endpoint tem negotiate + handshake + frames, não é WS
+  cru). `carregar` virou `useCallback` reusado por 3 caminhos: mount, evento e reconnect.
+  **O push é sinal, não dado**: `ComentarioResponse` não tem `DataCriacao`/`AutorImagemUrl`/
+  `EhAutorDoPost`/`Respostas` → chegou evento, refaz o `GET`. `stop()` no cleanup (sem ele,
+  trocar de post deixa conexão viva no grupo antigo); `.catch()` vazio no `start` e no `stop`
+  de propósito (degradar > quebrar; StrictMode aborta no meio do negotiate). `onreconnected`
+  faz **duas** coisas: `Entrar` de novo (grupo guarda ConnectionId, que muda) + refetch.
+  As 3 strings sem compilador: rota, `"Entrar"`, `"ComentarioCriado"`. Build verde.
+  **Nada rodou ponta a ponta** — e2e escreveria no Supabase de produção. Fatia 23+24 fecham
+  o realtime de comentários.
+
 ## Cuidado ao montar quiz
 - `data-a` é índice 0-based do botão correto. Já saiu errado 2x na aula 05 (embaralhei a
   posição da resposta mas não atualizei o índice). SEMPRE reconferir: contar os botões de 0 e

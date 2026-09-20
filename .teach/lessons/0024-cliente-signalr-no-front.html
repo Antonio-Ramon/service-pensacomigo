@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aula 24 — O cliente SignalR no front</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+<h1>O cliente SignalR no front</h1>
+<p class="sub">Aula 24 · Fatia 24 · A outra metade do <a href="../../docs/adr/0001-realtime-signalr-mediatr.md">ADR 0001</a> — repo <code>front-pensacomigo</code></p>
+
+<div class="card win">
+<strong>Vitória desta aula:</strong> dois navegadores no mesmo post. Um comenta, o outro vê
+aparecer — sem F5, sem polling. O backend da <a href="0023-signalr-eventos-pos-commit.html">Aula 23</a>
+já empurra; falta alguém do outro lado escutando.
+</div>
+
+<h2>1. Por que um pacote, se WebSocket é nativo do browser</h2>
+<p>
+<code>new WebSocket("wss://…")</code> existe sem instalar nada. Mas o endpoint do SignalR não é
+um WebSocket cru: antes vem um <code>POST /hubs/comentarios/negotiate</code> que devolve o
+<code>connectionId</code> e a lista de transportes; depois um <em>handshake</em> de protocolo
+(<code>{"protocol":"json","version":1}</code>), e as mensagens são <em>frames</em> tipados
+terminados em <code>\u001e</code>. Falar isso na mão é o que a Aula 23 fez em Python <em>de
+propósito</em>, para provar que o servidor estava de pé — não é como se escreve um cliente.
+</p>
+<p>
+<code>@microsoft/signalr</code> é o cliente oficial do mesmo protocolo: ele faz o
+<em>negotiate</em>, o handshake, o <em>fallback</em> para Server-Sent Events ou long polling
+quando a rede bloqueia WS, e a reconexão com <em>backoff</em>. É a única dependência nova da
+fatia.
+</p>
+<pre><code>npm i @microsoft/signalr</code></pre>
+
+<h2>2. As três strings que o compilador não vigia</h2>
+<p>
+Este é o ponto que mais dói na prática. O TypeScript confere quase tudo neste front — os DTOs
+vêm de <code>src/types/api.d.ts</code>, gerado do OpenAPI. Mas a conversa com o Hub atravessa
+<strong>três strings</strong> que ninguém valida em tempo de compilação, e cujo erro é
+silencioso: nada estoura, simplesmente não chega mensagem.
+</p>
+<table>
+<tr><th>String</th><th>Onde nasce no backend</th><th>Sintoma se errar</th></tr>
+<tr><td><code>"/hubs/comentarios"</code></td><td><code>MapHub&lt;ComentariosHub&gt;(…)</code> no <code>Program.cs</code></td><td>404 no <code>/negotiate</code> — este, pelo menos, aparece no Network</td></tr>
+<tr><td><code>"Entrar"</code></td><td>método <code>public</code> do <code>ComentariosHub</code></td><td>a conexão sobe, o grupo nunca é entrado, nada chega</td></tr>
+<tr><td><code>"ComentarioCriado"</code></td><td>1º argumento do <code>SendAsync</code> no handler</td><td>o servidor empurra, o cliente ignora, nada chega</td></tr>
+</table>
+<div class="card tip">
+Em C# quem chama o Hub errado toma exceção; em JS o <code>invoke</code> de método inexistente
+rejeita a <em>promise</em> — e um <code>.catch(() =&gt; {})</code> mal colocado engole. Ao
+depurar realtime, a primeira pergunta é sempre <em>"as três strings batem?"</em>, e a segunda é
+<em>"o <code>/negotiate</code> devolveu 200?"</em>.
+</div>
+
+<h2>3. O push é um <em>sinal</em>, não o dado</h2>
+<p>
+A tentação é mandar o comentário que chegou direto para dentro do <code>useState</code>.
+Olha o que o servidor empurra:
+</p>
+<pre><code>public record ComentarioResponse(Guid Id, Guid PostId, Guid? ParentId,
+                                 string Autor, string Conteudo, bool Aprovado);</code></pre>
+<p>E olha o que a lista na tela consome:</p>
+<pre><code>public record ComentarioListaResponse(Guid Id, string Autor, string Conteudo,
+    DateTime DataCriacao, bool Aprovado, string? AutorImagemUrl, bool EhAutorDoPost,
+    IReadOnlyList&lt;RespostaResponse&gt; Respostas);</code></pre>
+<p>
+Faltam <code>DataCriacao</code> (a coluna tem <code>default now()</code> — no momento em que o
+evento nasce o valor ainda não voltou do banco), <code>AutorImagemUrl</code>,
+<code>EhAutorDoPost</code> e <code>Respostas</code>. Dá para inventar os quatro no cliente; foi
+exatamente o que o formulário já faz no envio otimista, e é dívida barata ali porque quem
+escreveu sabe quem é. Para o comentário <em>de outra pessoa</em>, seria chute.
+</p>
+<div class="card warn">
+<strong>A regra que fecha o ADR:</strong> o <em>stream</em> é aceleração, o <code>GET</code> é a
+verdade. Chegou evento → refaz a listagem. Isso não é preguiça: como a Aula 23 mostrou, um
+processo que morre entre o <em>commit</em> e o <em>publish</em> grava o comentário e perde o
+evento. Um front que só sabe aplicar <em>deltas</em> fica permanentemente errado; um que refaz o
+<code>GET</code> se conserta sozinho na próxima mensagem — ou no próximo F5.
+</div>
+
+<h2>4. Ciclo de vida: o efeito abre, o <em>cleanup</em> fecha</h2>
+<p>
+Conexão é recurso, e todo recurso no React vive num <code>useEffect</code> cujo retorno o
+desmonta. Sem o <code>stop()</code> no <em>cleanup</em>, navegar entre dois posts deixa a
+conexão antiga viva: o leitor continua no grupo do post anterior e passa a receber comentário de
+post que nem está na tela.
+</p>
+<pre><code>useEffect(() =&gt; {
+  const conexao = new HubConnectionBuilder()
+    .withUrl(`${API_PUBLICA}/hubs/comentarios`)   <span class="cmt">// string 1</span>
+    .withAutomaticReconnect()
+    .build();
+
+  const entrar = () =&gt; conexao.invoke("Entrar", postId);   <span class="cmt">// string 2</span>
+
+  conexao.on("ComentarioCriado", carregar);                <span class="cmt">// string 3</span>
+  conexao.onreconnected(() =&gt; { entrar(); carregar(); });
+  conexao.start().then(entrar).catch(() =&gt; {});   <span class="cmt">// sem realtime o GET ainda manda</span>
+
+  return () =&gt; { conexao.stop().catch(() =&gt; {}); };
+}, [postId, carregar]);</code></pre>
+<p>
+O <code>catch</code> vazio no <code>start</code> é deliberado e é a diferença entre <em>degradar</em>
+e <em>quebrar</em>: API fora do ar, rede bloqueando WS, extensão do navegador atrapalhando — a
+página continua funcionando como sempre funcionou, com o <code>GET</code> e o formulário.
+Realtime é melhoria, não requisito.
+</p>
+<div class="card tip">
+<strong>StrictMode em dev monta, desmonta e remonta</strong> cada componente. O
+<code>stop()</code> pode chegar no meio do <em>negotiate</em> e rejeitar — daí o
+<code>catch</code> também no <em>cleanup</em>. Em produção isso não acontece; o ruído é do modo
+de desenvolvimento, que existe justamente para expor <em>cleanup</em> ausente.
+</div>
+
+<h2>5. Reconectar não é reentrar</h2>
+<p>
+<code>withAutomaticReconnect()</code> devolve <strong>a conexão</strong>. Não devolve
+<strong>os grupos</strong> — e essa distinção é a pegadinha guardada desde a Aula 23: no servidor
+o grupo é uma lista de <code>ConnectionId</code>, e o <code>ConnectionId</code>
+<em>muda</em> quando a conexão cai e volta. A conexão reconectada é, para o Hub, um desconhecido.
+</p>
+<p>
+Por isso o <code>onreconnected</code> faz <strong>duas</strong> coisas: reinvoca
+<code>Entrar</code> (senão o resto da sessão é silêncio) e refaz o <code>GET</code> (senão os
+comentários da janela offline não existem para esta tela). Qualquer uma das duas sozinha deixa um
+buraco.
+</p>
+
+<h2>6. Checkpoint</h2>
+
+<div class="q" data-a="2">
+<p><strong>1.</strong> Por que instalar <code>@microsoft/signalr</code> em vez de usar <code>new WebSocket</code>?</p>
+<button>Porque o WebSocket nativo do browser não atravessa CORS, e o cliente oficial resolve isso</button>
+<button>Porque só o cliente oficial consegue entrar num grupo, que é um conceito do protocolo WS</button>
+<button>Porque o endpoint exige negotiate, handshake e frames próprios, além de fallback e reconexão</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="0">
+<p><strong>2.</strong> O nome do evento no <code>.on()</code> está escrito errado. O que acontece?</p>
+<button>Nada estoura: o servidor empurra normalmente, o cliente ignora e a tela nunca atualiza</button>
+<button>O start rejeita a promise na hora do handshake, porque o nome não existe no contrato</button>
+<button>O negotiate devolve 404 e o cliente cai para long polling, entregando com atraso grande</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>3.</strong> Por que o evento recebido não vai direto para o <code>useState</code>?</p>
+<button>Porque o corpo chega como string bruta e precisaria de um parse manual antes do setState</button>
+<button>Porque o corpo empurrado não tem data, foto, selo e respostas — refazer o GET é a verdade</button>
+<button>Porque o setState dentro do handler do socket roda fora do React e não dispara renderização</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="2">
+<p><strong>4.</strong> O que falta se o <code>useEffect</code> não devolver um <code>stop()</code>?</p>
+<button>O grupo do post fica lotado de conexões mortas e o servidor recusa entradas novas nele</button>
+<button>A memória do browser cresce, mas a tela segue correta porque o componente já saiu do DOM</button>
+<button>A conexão antiga sobrevive à troca de post e o leitor recebe comentário de post que não vê</button>
+<div class="fb"></div>
+</div>
+
+<div class="q" data-a="1">
+<p><strong>5.</strong> Por que reinvocar <code>Entrar</code> no <code>onreconnected</code>?</p>
+<button>Porque o reconnect zera o protocolo e é preciso refazer o handshake antes de qualquer envio</button>
+<button>Porque o grupo guarda ConnectionId, e o reconnect gera outro: para o Hub é uma conexão nova</button>
+<button>Porque o servidor expira o grupo por inatividade e recria a lista vazia após alguns segundos</button>
+<div class="fb"></div>
+</div>
+
+<hr>
+<p class="sub">
+<strong>Fonte primária:</strong>
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/javascript-client">ASP.NET Core
+SignalR JavaScript client (Microsoft Learn)</a>. Complementos:
+<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/javascript-client#reconnect-clients">Reconexão
+automática</a>,
+<a href="https://react.dev/reference/react/useEffect#connecting-to-an-external-system">useEffect —
+conectar a um sistema externo (react.dev)</a> e
+<a href="https://react.dev/reference/react/StrictMode#fixing-bugs-found-by-re-running-effects-in-development">StrictMode
+e efeitos que rodam duas vezes</a>.
+</p>
+<p class="sub">
+Anterior: <a href="0023-signalr-eventos-pos-commit.html">Aula 23 — SignalR e eventos pós-commit</a> ·
+<a href="0020-comentarios-rate-limit-memoria.html">Aula 20 — criar comentário</a>.
+Dúvida em qualquer ponto? Pergunta ao agente — ele é seu professor.
+</p>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
