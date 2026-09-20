@@ -1,7 +1,8 @@
-using FluentValidation;
+﻿using FluentValidation;
 using Microsoft.Extensions.DependencyInjection;
 using PensaComigo.Application.Behaviors;
 using PensaComigo.Application.Comentarios;
+using PensaComigo.Application.Messaging;
 
 namespace PensaComigo.Application;
 
@@ -17,6 +18,7 @@ public static class DependencyInjection
 
             cfg.AddOpenBehavior(typeof(LoggingBehavior<,>));
             cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
+            cfg.AddOpenBehavior(typeof(DespachoDeEventosBehavior<,>));
             cfg.AddOpenBehavior(typeof(UnitOfWorkBehavior<,>));
         });
 
@@ -27,6 +29,9 @@ public static class DependencyInjection
         // nasceria vazio a cada chamada e o limite nunca bateria.
         services.AddMemoryCache();
         services.AddSingleton<LimitadorDeComentarios>();
+
+        // Buffer de eventos da requisição (Fatia 23). Scoped: uma fila por requisição.
+        services.AddScoped<FilaDeEventos>();
 
         return services;
     }

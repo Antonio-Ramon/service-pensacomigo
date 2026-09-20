@@ -74,6 +74,11 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
     não só por "tem token".
 
 ## Roadmap do Ticket 08 (Likes)
+## Realtime (ADR 0001)
+23. ✅ **SignalR + eventos pós-commit**: Hub com grupos `post:{id}`, `FilaDeEventos` + 
+    `DespachoDeEventosBehavior` envolvendo o `UnitOfWork`, `INotification`/`Publish` vs
+    `IRequest`/`Send`. Backend pronto; falta o consumo no front. ← *estamos aqui*
+
 22. ✅ **Idempotência + unicidade no banco**: curtir/descurtir anônimo; `if` é conveniência e a
     constraint única é a garantia; contador desnormalizado com `ExecuteUpdateAsync` nos dois
-    sentidos e o preço de pular o Unit of Work. ← *estamos aqui*
+    sentidos e o preço de pular o Unit of Work.

@@ -1,4 +1,5 @@
 ﻿using MediatR;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Domain.Entities;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
@@ -13,7 +14,8 @@ public class CriarComentarioCommandHandler(
     IPostRepository posts,
     IComentarioRepository comentarios,
     IUsuarioRepository usuarios,
-    LimitadorDeComentarios limitador)
+    LimitadorDeComentarios limitador,
+    FilaDeEventos eventos)
     : IRequestHandler<CriarComentarioCommand, ComentarioResponse>
 {
     public async Task<ComentarioResponse> Handle(CriarComentarioCommand cmd, CancellationToken ct)
@@ -63,8 +65,13 @@ public class CriarComentarioCommandHandler(
 
         await comentarios.AdicionarAsync(comentario, ct);
 
-        return new ComentarioResponse(
+        var resposta = new ComentarioResponse(
             comentario.Id, comentario.PostId, comentario.ParentId,
             comentario.Autor, comentario.Conteudo, comentario.Aprovado);
+
+        // Enfileira, não publica: aqui o INSERT ainda não saiu (só o ChangeTracker sabe).
+        eventos.Adicionar(new ComentarioCriado(resposta));
+
+        return resposta;
     }
 }
