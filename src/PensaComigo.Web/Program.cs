@@ -13,6 +13,8 @@ using MediatR;
 using PensaComigo.Application;
 using PensaComigo.Application.Auth;
 using PensaComigo.Application.Comentarios;
+using PensaComigo.Application.Curtidas;
+using PensaComigo.Application.Posts;
 using PensaComigo.Application.Links;
 using PensaComigo.Application.Storage;
 using PensaComigo.Persistence;
@@ -65,9 +67,13 @@ builder.Services.AddApplication();
 
 // SignalR é nativo do ASP.NET Core — nenhum pacote novo (ADR 0001).
 builder.Services.AddSignalR();
-// O scan do MediatR varre a assembly da Application, e este handler mora aqui no host.
-// Publish com zero handlers NÃO é erro: sem esta linha tudo passa e nada chega na tela.
+// O scan do MediatR varre a assembly da Application, e estes handlers moram aqui no host.
+// Publish com zero handlers NÃO é erro: sem estas linhas tudo passa e nada chega na tela.
 builder.Services.AddScoped<INotificationHandler<ComentarioCriado>, ComentarioCriadoHandler>();
+builder.Services.AddScoped<INotificationHandler<CurtidasAtualizadas>, CurtidasAtualizadasHandler>();
+builder.Services.AddScoped<INotificationHandler<PostVisualizado>, PostVisualizadoHandler>();
+builder.Services.AddScoped<INotificationHandler<PostPublicado>, PostPublicadoHandler>();
+builder.Services.AddScoped<INotificationHandler<PostRemovido>, PostRemovidoHandler>();
 builder.Services.AddPersistence(builder.Configuration);
 
 // Impls dos seams de auth (Fatia 10). Ficam no host: dependem de config e de libs externas
@@ -250,7 +256,7 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHub<ComentariosHub>("/hubs/comentarios");
+app.MapHub<TempoRealHub>("/hubs/tempo-real");
 
 app.Run();
 

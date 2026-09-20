@@ -20,7 +20,7 @@ já empurra; falta alguém do outro lado escutando.
 <h2>1. Por que um pacote, se WebSocket é nativo do browser</h2>
 <p>
 <code>new WebSocket("wss://…")</code> existe sem instalar nada. Mas o endpoint do SignalR não é
-um WebSocket cru: antes vem um <code>POST /hubs/comentarios/negotiate</code> que devolve o
+um WebSocket cru: antes vem um <code>POST /hubs/tempo-real/negotiate</code> que devolve o
 <code>connectionId</code> e a lista de transportes; depois um <em>handshake</em> de protocolo
 (<code>{"protocol":"json","version":1}</code>), e as mensagens são <em>frames</em> tipados
 terminados em <code>\u001e</code>. Falar isso na mão é o que a Aula 23 fez em Python <em>de
@@ -34,6 +34,13 @@ fatia.
 </p>
 <pre><code>npm i @microsoft/signalr</code></pre>
 
+<div class="card tip">
+<strong>Nota da <a href="0025-fanout-sinal-ou-valor.html">Aula 25</a>:</strong> o hub foi renomeado
+para <code>TempoRealHub</code> em <code>/hubs/tempo-real</code> quando passou a carregar curtida,
+visualização e feed — e a conexão saiu do <code>useEffect</code> para um módulo compartilhado. O
+raciocínio desta aula continua valendo; mudaram a rota e o lugar onde a conexão mora.
+</div>
+
 <h2>2. As três strings que o compilador não vigia</h2>
 <p>
 Este é o ponto que mais dói na prática. O TypeScript confere quase tudo neste front — os DTOs
@@ -43,8 +50,8 @@ silencioso: nada estoura, simplesmente não chega mensagem.
 </p>
 <table>
 <tr><th>String</th><th>Onde nasce no backend</th><th>Sintoma se errar</th></tr>
-<tr><td><code>"/hubs/comentarios"</code></td><td><code>MapHub&lt;ComentariosHub&gt;(…)</code> no <code>Program.cs</code></td><td>404 no <code>/negotiate</code> — este, pelo menos, aparece no Network</td></tr>
-<tr><td><code>"Entrar"</code></td><td>método <code>public</code> do <code>ComentariosHub</code></td><td>a conexão sobe, o grupo nunca é entrado, nada chega</td></tr>
+<tr><td><code>"/hubs/tempo-real"</code></td><td><code>MapHub&lt;TempoRealHub&gt;(…)</code> no <code>Program.cs</code></td><td>404 no <code>/negotiate</code> — este, pelo menos, aparece no Network</td></tr>
+<tr><td><code>"Entrar"</code></td><td>método <code>public</code> do <code>TempoRealHub</code></td><td>a conexão sobe, o grupo nunca é entrado, nada chega</td></tr>
 <tr><td><code>"ComentarioCriado"</code></td><td>1º argumento do <code>SendAsync</code> no handler</td><td>o servidor empurra, o cliente ignora, nada chega</td></tr>
 </table>
 <div class="card tip">
@@ -89,7 +96,7 @@ post que nem está na tela.
 </p>
 <pre><code>useEffect(() =&gt; {
   const conexao = new HubConnectionBuilder()
-    .withUrl(`${API_PUBLICA}/hubs/comentarios`)   <span class="cmt">// string 1</span>
+    .withUrl(`${API_PUBLICA}/hubs/tempo-real`)   <span class="cmt">// string 1</span>
     .withAutomaticReconnect()
     .build();
 

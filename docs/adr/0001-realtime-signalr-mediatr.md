@@ -2,8 +2,9 @@
 
 **Data:** 2026-08-01
 **Status:** aceito
-**Revisado em:** 2026-09-20 — o mecanismo de emissão do evento foi corrigido (ver *Decisão*,
-*Fonte do evento*). A decisão de transporte e de fonte permanece a mesma.
+**Revisado em:** 2026-09-20 — duas vezes. (1) o mecanismo de emissão do evento foi corrigido
+(ver *Decisão*, *Fonte do evento*). (2) o escopo passou de comentário para curtida, visualização
+e feed (Fatia 25): hub renomeado e a regra do payload explicitada. Transporte e fonte inalterados.
 
 ## Contexto
 
@@ -74,7 +75,7 @@ Descartados:
 ## Desenho
 
 ```
-FE  ──(WebSocket/SignalR + JWT)──►  ComentariosHub / grupo "post:{id}"
+FE  ──(WebSocket/SignalR)──►  TempoRealHub / grupo "post:{id}" (ou Clients.All, no feed)
                                           ▲
                                           │
 DespachoDeEventosBehavior                 │

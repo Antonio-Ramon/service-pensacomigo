@@ -1,5 +1,6 @@
 using MediatR;
 using PensaComigo.Application.Common;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
@@ -11,7 +12,8 @@ namespace PensaComigo.Application.Posts.Editar;
 /// o change tracker (Fatia 16) monta o UPDATE e o UnitOfWorkBehavior commita.
 /// Slug não entra: congelou na criação.
 /// </summary>
-public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags, IEtapaRepository etapas)
+public class EditarPostCommandHandler(
+    IPostRepository posts, ITagRepository tags, IEtapaRepository etapas, FilaDeEventos eventos)
     : IRequestHandler<EditarPostCommand, PostResponse>
 {
     public async Task<PostResponse> Handle(EditarPostCommand cmd, CancellationToken ct)
@@ -21,6 +23,10 @@ public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags
         // Não é dono → 404, não 403: responder "existe, mas não é seu" já vaza o acervo alheio.
         if (post is null || post.AutorId != cmd.AutorId)
             throw new NaoEncontradoException("Post", cmd.Id.ToString());
+
+        // Guardado ANTES de sobrescrever: o feed muda quando o status CRUZA a fronteira
+        // do público, não quando o texto muda.
+        var estavaNoAr = post.Status == StatusPost.Publicado;
 
         var vinculadas = await tags.ObterPorIdsAsync(cmd.TagIds, ct);
         var faltando = cmd.TagIds.Except(vinculadas.Select(t => t.Id)).ToList();
@@ -53,6 +59,13 @@ public class EditarPostCommandHandler(IPostRepository posts, ITagRepository tags
         // Trocar a coleção inteira: o EF compara com o que carregou e emite só o
         // delta em post_tags (DELETE das que saíram, INSERT das que entraram).
         post.Tags = vinculadas;
+
+        var ficouNoAr = post.Status == StatusPost.Publicado;
+        if (!estavaNoAr && ficouNoAr)
+            eventos.Adicionar(new PostPublicado(post.Id, post.Slug));
+        // Despublicar some do feed tanto quanto deletar — para quem está olhando, é o mesmo fato.
+        else if (estavaNoAr && !ficouNoAr)
+            eventos.Adicionar(new PostRemovido(post.Id, post.Slug));
 
         return new PostResponse(post.Id, post.Titulo, post.Slug, post.TempoLeitura);
     }

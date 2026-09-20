@@ -81,7 +81,9 @@ O backend `service-pensacomigo` (Clean Architecture, 5 projetos). Começando pel
 24. ✅ **Cliente SignalR no front**: `@microsoft/signalr`, as três strings que o compilador não
     vigia, push como *sinal* (refetch do `GET`), conexão como recurso do `useEffect` e
     `Entrar` de novo no `onreconnected`. Realtime de comentários fechado ponta a ponta.
-    ← *estamos aqui*
+25. ✅ **Fan-out — sinal ou valor**: curtida, visualização e feed ao vivo. `RETURNING` para
+    empurrar o número, `Clients.All` para quem não está em grupo, um hub só (`TempoRealHub`) e
+    uma conexão por aba no front. ← *estamos aqui*
 
 22. ✅ **Idempotência + unicidade no banco**: curtir/descurtir anônimo; `if` é conveniência e a
     constraint única é a garantia; contador desnormalizado com `ExecuteUpdateAsync` nos dois

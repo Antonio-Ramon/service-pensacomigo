@@ -1,11 +1,12 @@
 using MediatR;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Application.Tags;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
 
 namespace PensaComigo.Application.Posts.Abrir;
 
-public class AbrirPostCommandHandler(IPostRepository posts)
+public class AbrirPostCommandHandler(IPostRepository posts, FilaDeEventos eventos)
     : IRequestHandler<AbrirPostCommand, PostDetalheResponse>
 {
     public async Task<PostDetalheResponse> Handle(AbrirPostCommand cmd, CancellationToken ct)
@@ -24,6 +25,13 @@ public class AbrirPostCommandHandler(IPostRepository posts)
         // ponytail: incremento cru, sem dedup por visitante — se virar métrica séria, deduplicar
         // por viewer_hash como nos likes.
         await posts.IncrementarVisualizacoesAsync(post!.Id, ct);
+
+        // O número sai de graça: é o mesmo que já vai na resposta. Quem acabou de abrir ainda
+        // não está no grupo (entra depois, pelo Entrar), então recebe o valor pelo corpo do GET
+        // e os próximos pelo WebSocket.
+        // ponytail: 1 mensagem por leitor que abre. Post viral vira metralhadora no grupo —
+        // se incomodar, agregar num BackgroundService com PeriodicTimer e empurrar de N em N.
+        eventos.Adicionar(new PostVisualizado(post.Id, post.QtdVisualizacoes + 1));
 
         return new PostDetalheResponse(
             post.Id, post.Titulo, post.Dek, post.Slug, post.ImagemCapa,

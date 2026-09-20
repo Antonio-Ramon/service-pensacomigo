@@ -1,9 +1,10 @@
 using MediatR;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Domain.Repositories;
 
 namespace PensaComigo.Application.Curtidas.Descurtir;
 
-public class DescurtirPostCommandHandler(IPostRepository posts, ILikeRepository likes)
+public class DescurtirPostCommandHandler(IPostRepository posts, ILikeRepository likes, FilaDeEventos eventos)
     : IRequestHandler<DescurtirPostCommand, Unit>
 {
     public async Task<Unit> Handle(DescurtirPostCommand cmd, CancellationToken ct)
@@ -16,7 +17,10 @@ public class DescurtirPostCommandHandler(IPostRepository posts, ILikeRepository 
             return Unit.Value;
 
         likes.Remover(like);
-        await posts.AjustarCurtidasAsync(cmd.PostId, -1, ct);
+        var qtd = await posts.AjustarCurtidasAsync(cmd.PostId, -1, ct);
+
+        if (qtd is int total)
+            eventos.Adicionar(new CurtidasAtualizadas(cmd.PostId, total));
 
         return Unit.Value;
     }

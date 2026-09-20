@@ -1,5 +1,6 @@
 using MediatR;
 using PensaComigo.Application.Common;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Domain.Entities;
 using PensaComigo.Domain.Enums;
 using PensaComigo.Domain.Exceptions;
@@ -11,7 +12,8 @@ namespace PensaComigo.Application.Posts.Criar;
 /// Impureim sandwich: lê (slugs ocupados + tags), decide com funções puras
 /// (slug e tempo de leitura), grava. Quem commita é o UnitOfWorkBehavior.
 /// </summary>
-public class CriarPostCommandHandler(IPostRepository posts, ITagRepository tags, IEtapaRepository etapas)
+public class CriarPostCommandHandler(
+    IPostRepository posts, ITagRepository tags, IEtapaRepository etapas, FilaDeEventos eventos)
     : IRequestHandler<CriarPostCommand, PostResponse>
 {
     public async Task<PostResponse> Handle(CriarPostCommand cmd, CancellationToken ct)
@@ -58,6 +60,11 @@ public class CriarPostCommandHandler(IPostRepository posts, ITagRepository tags,
         };
 
         await posts.AdicionarAsync(post, ct);
+
+        // Só o que ENTRA no feed anuncia. Rascunho não existe para o público, e agendado
+        // ainda não venceu.
+        if (post.Status == StatusPost.Publicado)
+            eventos.Adicionar(new PostPublicado(post.Id, post.Slug));
 
         return new PostResponse(post.Id, post.Titulo, post.Slug, post.TempoLeitura);
     }

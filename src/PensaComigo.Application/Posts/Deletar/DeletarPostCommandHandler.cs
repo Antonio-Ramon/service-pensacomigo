@@ -1,4 +1,5 @@
 using MediatR;
+using PensaComigo.Application.Messaging;
 using PensaComigo.Domain.Exceptions;
 using PensaComigo.Domain.Repositories;
 
@@ -8,7 +9,7 @@ namespace PensaComigo.Application.Posts.Deletar;
 /// Delete físico. Comentários, likes e as linhas de post_tags caem junto por
 /// <c>OnDelete(Cascade)</c> no schema — o banco resolve, não o handler.
 /// </summary>
-public class DeletarPostCommandHandler(IPostRepository posts)
+public class DeletarPostCommandHandler(IPostRepository posts, FilaDeEventos eventos)
     : IRequestHandler<DeletarPostCommand, Unit>
 {
     public async Task<Unit> Handle(DeletarPostCommand cmd, CancellationToken ct)
@@ -19,6 +20,7 @@ public class DeletarPostCommandHandler(IPostRepository posts)
             throw new NaoEncontradoException("Post", cmd.Id.ToString());
 
         posts.Remover(post);
+        eventos.Adicionar(new PostRemovido(post.Id, post.Slug));
 
         return Unit.Value;
     }
