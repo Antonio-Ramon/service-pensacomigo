@@ -1,11 +1,10 @@
-using Gridify;
 using PensaComigo.Application.Curtidas;
 using PensaComigo.Application.Curtidas.Curtir;
 using PensaComigo.Application.Curtidas.Descurtir;
 using PensaComigo.Application.Messaging;
-using PensaComigo.Domain.Common;
 using PensaComigo.Domain.Entities;
 using PensaComigo.Domain.Repositories;
+using PensaComigo.UnitTests.Fakes;
 
 namespace PensaComigo.UnitTests.Curtidas;
 
@@ -17,27 +16,6 @@ namespace PensaComigo.UnitTests.Curtidas;
 public class EventoDeCurtidaTests
 {
     private static readonly Guid PostId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-
-    /// <summary><paramref name="contador"/> é o que o UPDATE ... RETURNING devolveria.</summary>
-    private sealed class PostRepositorioFake(int? contador) : IPostRepository
-    {
-        public Task<int?> AjustarCurtidasAsync(Guid id, int delta, CancellationToken ct = default) =>
-            Task.FromResult(contador);
-
-        public Task<bool> ExistePorIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult(true);
-
-        // O resto da interface não participa deste caso de uso.
-        public Task<Post?> ObterPorIdAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Guid?> ObterAutorIdAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Pagina<Post>> ListarAsync(IGridifyQuery consulta, bool incluirRascunhos = false, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Post?> ObterPorSlugAsync(string slug, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Post?> ObterDetalhePorIdAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task IncrementarVisualizacoesAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<string>> ListarSlugsComPrefixoAsync(string prefixo, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Post?> ObterParaEdicaoAsync(Guid id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task AdicionarAsync(Post post, CancellationToken ct = default) => throw new NotSupportedException();
-        public void Remover(Post post) => throw new NotSupportedException();
-    }
 
     private sealed class LikeRepositorioFake(Like? existente) : ILikeRepository
     {
